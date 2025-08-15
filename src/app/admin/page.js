@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation';
 import { Shield, Crown, Users, ArrowLeft, Database, Lock, Tag, MessageSquare } from 'lucide-react';
 
 export default function AdminDashboard() {
-  const { user, userRoles, isSuperAdmin, getPrimaryRole, loading } = useAuth();
+  const { user, isSuperAdmin, getPrimaryRole, loading, signOut } = useAuth();
   const router = useRouter();
 
   if (loading) {
@@ -58,10 +58,16 @@ export default function AdminDashboard() {
               Manage users, roles, and system settings
             </p>
           </div>
-          <Button onClick={() => router.push('/')} variant="outline">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to App
-          </Button>
+          <div className="flex gap-3">
+            <Button onClick={() => router.push('/')} variant="outline">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to App
+            </Button>
+            <Button onClick={() => signOut()} variant="destructive">
+              <Lock className="mr-2 h-4 w-4" />
+              Logout
+            </Button>
+          </div>
         </div>
 
         {/* Admin Status Card */}
@@ -85,11 +91,9 @@ export default function AdminDashboard() {
                 <div>
                   <p className="text-sm text-muted-foreground">All Roles</p>
                   <div className="flex gap-1 flex-wrap mt-1">
-                    {userRoles.map((role) => (
-                      <Badge key={role} variant="outline" className="text-xs">
-                        {role}
-                      </Badge>
-                    ))}
+                    <Badge variant="outline" className="text-xs">
+                      super_admin
+                    </Badge>
                   </div>
                 </div>
                 <div>

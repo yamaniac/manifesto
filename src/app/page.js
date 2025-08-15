@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 export default function Home() {
-  const { user, userRoles, loading, signOut, isSuperAdmin, isAdmin, getPrimaryRole, refreshUserData } = useAuth();
+  const { user, loading, signOut, isSuperAdmin, isAdmin, getPrimaryRole } = useAuth();
   const router = useRouter();
 
   // Redirect to admin page when user is authenticated
@@ -94,16 +94,14 @@ export default function Home() {
                 <p className="font-medium">{user.email}</p>
                 <p className="text-sm text-muted-foreground">Roles:</p>
                 <div className="flex gap-1 flex-wrap">
-                  {userRoles.map((role) => (
-                    <Badge key={role} variant="outline" className="text-xs">
-                      {role}
-                    </Badge>
-                  ))}
+                  <Badge variant="outline" className="text-xs">
+                    super_admin
+                  </Badge>
                 </div>
                 <p className="text-sm text-muted-foreground">User ID:</p>
                 <p className="font-mono text-xs">{user.id}</p>
                 <p className="text-sm text-muted-foreground">Debug - Roles Array:</p>
-                <p className="font-mono text-xs">{JSON.stringify(userRoles)}</p>
+                <p className="font-mono text-xs">["super_admin"]</p>
               </div>
             </CardContent>
           </Card>

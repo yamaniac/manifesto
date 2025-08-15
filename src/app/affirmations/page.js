@@ -15,7 +15,7 @@ import { ArrowLeft, Plus, Edit, Trash2, Heart, MessageSquare, Filter, Star } fro
 import { createClient } from '@/lib/supabase/client';
 
 export default function AffirmationsPage() {
-  const { user, loading } = useAuth();
+  const { user, loading, isSuperAdmin } = useAuth();
   const router = useRouter();
   const [affirmations, setAffirmations] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -222,6 +222,31 @@ export default function AffirmationsPage() {
     );
   }
 
+  // Check if user has super admin access
+  if (!isSuperAdmin()) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+        <div className="container mx-auto p-8">
+          <Card className="max-w-md mx-auto">
+            <CardContent className="p-6">
+              <div className="text-center">
+                <Lock className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-2">Access Denied</h3>
+                <p className="text-muted-foreground mb-4">
+                  You need super admin privileges to manage affirmations.
+                </p>
+                <Button onClick={() => router.push('/admin')} variant="outline">
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Back to Admin
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
       <div className="container mx-auto p-8">
@@ -230,10 +255,10 @@ export default function AffirmationsPage() {
           <div>
             <h1 className="text-3xl font-bold flex items-center gap-2">
               <MessageSquare className="h-8 w-8 text-purple-500" />
-              My Affirmations
+              Affirmations Management
             </h1>
             <p className="text-muted-foreground mt-1">
-              Create and organize your daily affirmations
+              Super Admin: Create and organize system affirmations
             </p>
           </div>
           <div className="flex gap-2">

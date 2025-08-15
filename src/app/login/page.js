@@ -7,51 +7,33 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
-import { Eye, EyeOff, Github, Mail } from 'lucide-react';
+import { Eye, EyeOff, AlertCircle, Shield } from 'lucide-react';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
-  const { signIn, signUp, signInWithProvider } = useAuth();
+  const { signIn } = useAuth();
   const router = useRouter();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
     setLoading(true);
     setError('');
 
     try {
-      const { error } = isSignUp 
-        ? await signUp(email, password)
-        : await signIn(email, password);
+      const result = await signIn(email, password);
+      const { error } = result;
 
       if (error) {
         setError(error.message);
       } else {
-        if (isSignUp) {
-          setError('Check your email for the confirmation link!');
-        } else {
-          router.push('/');
-        }
-      }
-    } catch (err) {
-      setError('An unexpected error occurred.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleOAuthSignIn = async (provider) => {
-    setLoading(true);
-    try {
-      const { error } = await signInWithProvider(provider);
-      if (error) {
-        setError(error.message);
+        // Success - redirect to admin
+        router.push('/admin');
       }
     } catch (err) {
       setError('An unexpected error occurred.');
@@ -64,19 +46,20 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
+          <div className="flex items-center justify-center mb-2">
+            <Shield className="h-8 w-8 text-blue-600" />
+          </div>
           <CardTitle className="text-2xl font-bold text-center">
-            {isSignUp ? 'Create an account' : 'Welcome back'}
+            Login
           </CardTitle>
           <CardDescription className="text-center">
-            {isSignUp 
-              ? 'Enter your details to create your account' 
-              : 'Enter your credentials to access your account'
-            }
+            Enter your credentials to access the system
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {error && (
-            <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md dark:bg-red-900/20 dark:border-red-800 dark:text-red-400">
+            <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md dark:bg-red-900/20 dark:border-red-800 dark:text-red-400 flex items-center gap-2">
+              <AlertCircle className="h-4 w-4" />
               {error}
             </div>
           )}
@@ -130,52 +113,14 @@ export default function LoginPage() {
               className="w-full" 
               disabled={loading}
             >
-              {loading ? 'Loading...' : isSignUp ? 'Sign Up' : 'Sign In'}
+              {loading ? 'Signing In...' : 'Sign In'}
             </Button>
           </form>
-
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-background px-2 text-muted-foreground">
-                Or continue with
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant="outline"
-              onClick={() => handleOAuthSignIn('github')}
-              disabled={loading}
-            >
-              <Github className="mr-2 h-4 w-4" />
-              GitHub
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => handleOAuthSignIn('google')}
-              disabled={loading}
-            >
-              <Mail className="mr-2 h-4 w-4" />
-              Google
-            </Button>
-          </div>
         </CardContent>
         
         <CardFooter>
           <div className="text-center text-sm text-muted-foreground w-full">
-            {isSignUp ? 'Already have an account?' : "Don't have an account?"}{' '}
-            <Button
-              variant="link"
-              className="p-0 h-auto font-normal"
-              onClick={() => setIsSignUp(!isSignUp)}
-              disabled={loading}
-            >
-              {isSignUp ? 'Sign in' : 'Sign up'}
-            </Button>
+            <p>Simple email and password login</p>
           </div>
         </CardFooter>
       </Card>
