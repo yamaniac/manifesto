@@ -159,6 +159,7 @@ export default function PrivacyPolicy() {
                 <li>View and edit your personal information through the app settings</li>
                 <li>Delete your account and associated data at any time</li>
                 <li>Export your data in a portable format</li>
+                <li>In case if the user wants to delete their data manually, they can request to do so by sending an email to higoshme@gmail.com</li>
               </ul>
 
               <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-3">
