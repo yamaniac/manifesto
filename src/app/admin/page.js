@@ -1,204 +1,129 @@
 'use client';
 
-import { useAuth } from '@/contexts/AuthContext';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import UserManagement from '@/components/admin/UserManagement';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shield, Crown, Users, ArrowLeft, Database, Lock, Tag, MessageSquare } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { useAuth } from '@/contexts/AuthContext';
+import { Eye, EyeOff, AlertCircle, Shield } from 'lucide-react';
 
-export default function AdminDashboard() {
-  const { user, isSuperAdmin, getPrimaryRole, loading, signOut } = useAuth();
+export default function AdminPage() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  
+  const { signIn } = useAuth();
   const router = useRouter();
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    setLoading(true);
+    setError('');
 
-  if (!isSuperAdmin()) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
-        <div className="container mx-auto p-8">
-          <Card className="max-w-md mx-auto">
-            <CardContent className="p-6">
-              <div className="text-center">
-                <Lock className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">Access Denied</h3>
-                <p className="text-muted-foreground mb-4">
-                  You need super admin privileges to access the admin dashboard.
-                </p>
-                <Button onClick={() => router.push('/')} variant="outline">
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  Back to Dashboard
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
-  }
+    try {
+      const result = await signIn(email, password);
+      const { error } = result;
+
+      if (error) {
+        setError(error.message);
+      } else {
+        // Success - redirect to admin dashboard
+        router.push('/admin/dashboard');
+      }
+    } catch (err) {
+      setError('An unexpected error occurred.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
-      <div className="container mx-auto p-8">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className="text-3xl font-bold flex items-center gap-2">
-              <Crown className="h-8 w-8 text-yellow-500" />
-              Super Admin Dashboard
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              Manage users, roles, and system settings
-            </p>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader className="space-y-1">
+          <div className="flex items-center justify-center mb-2">
+            <Shield className="h-8 w-8 text-blue-600" />
           </div>
-          <div className="flex gap-3">
-            <Button onClick={() => router.push('/')} variant="outline">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to App
-            </Button>
-            <Button onClick={() => signOut()} variant="destructive">
-              <Lock className="mr-2 h-4 w-4" />
-              Logout
-            </Button>
-          </div>
-        </div>
-
-        {/* Admin Status Card */}
-        <div className="grid gap-6 md:grid-cols-3 mb-8">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Shield className="h-5 w-5" />
-                Your Admin Status
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-sm text-muted-foreground">Primary Role</p>
-                  <Badge variant="destructive" className="flex items-center gap-1 w-fit">
-                    <Crown className="h-3 w-3" />
-                    {getPrimaryRole()}
-                  </Badge>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">All Roles</p>
-                  <div className="flex gap-1 flex-wrap mt-1">
-                    <Badge variant="outline" className="text-xs">
-                      super_admin
-                    </Badge>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Email</p>
-                  <p className="font-medium">{user.email}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Users className="h-5 w-5" />
-                Quick Stats
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Super Admins</span>
-                  <span className="font-medium">1+</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Total Users</span>
-                  <span className="font-medium">View in table →</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">System Status</span>
-                  <Badge variant="default" className="text-xs">Active</Badge>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Database className="h-5 w-5" />
-                Admin Actions
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <Button variant="outline" size="sm" className="w-full justify-start">
-                  <Users className="mr-2 h-4 w-4" />
-                  Manage Users
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="w-full justify-start"
-                  onClick={() => router.push('/admin/categories')}
+          <CardTitle className="text-2xl font-bold text-center">
+            Admin Access
+          </CardTitle>
+          <CardDescription className="text-center">
+            Enter your credentials to access the admin system
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {error && (
+            <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md dark:bg-red-900/20 dark:border-red-800 dark:text-red-400 flex items-center gap-2">
+              <AlertCircle className="h-4 w-4" />
+              {error}
+            </div>
+          )}
+          
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="Enter your email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                disabled={loading}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  disabled={loading}
+                  className="pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowPassword(!showPassword)}
+                  disabled={loading}
                 >
-                  <Tag className="mr-2 h-4 w-4" />
-                  Categories
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
                 </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="w-full justify-start"
-                  onClick={() => router.push('/affirmations')}
-                >
-                  <MessageSquare className="mr-2 h-4 w-4" />
-                  Affirmations
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* User Management */}
-        <UserManagement />
-
-        {/* Admin Instructions */}
-        <Card className="mt-8">
-          <CardHeader>
-            <CardTitle>Admin Instructions</CardTitle>
-            <CardDescription>
-              How to manage your super admin system
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <h4 className="font-semibold mb-2">Assigning Roles</h4>
-                <ul className="text-sm text-muted-foreground space-y-1">
-                  <li>• Click "Add Role" next to any user</li>
-                  <li>• Choose Admin or Super Admin</li>
-                  <li>• Multiple roles can be assigned</li>
-                  <li>• Basic "user" role cannot be removed</li>
-                </ul>
-              </div>
-              <div>
-                <h4 className="font-semibold mb-2">Role Hierarchy</h4>
-                <ul className="text-sm text-muted-foreground space-y-1">
-                  <li>• <strong>Super Admin:</strong> Full system access</li>
-                  <li>• <strong>Admin:</strong> Limited management access</li>
-                  <li>• <strong>User:</strong> Basic application access</li>
-                </ul>
               </div>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+
+            <Button 
+              type="submit" 
+              className="w-full" 
+              disabled={loading}
+            >
+              {loading ? 'Signing In...' : 'Sign In'}
+            </Button>
+          </form>
+        </CardContent>
+        
+        <CardFooter>
+          <div className="text-center text-sm text-muted-foreground w-full">
+            <p>Restricted access - Admin credentials required</p>
+          </div>
+        </CardFooter>
+      </Card>
     </div>
   );
 }
