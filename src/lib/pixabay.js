@@ -42,15 +42,25 @@ export async function fetchImagesFromPixabay(query, perPage = 3) {
           return false;
         }
         
-        // Prefer images with people/faces for personal affirmations
+        // Prefer images with people/faces for personal affirmations, but not for wealth categories
         const tags = hit.tags.toLowerCase();
         const hasPerson = tags.includes('person') || tags.includes('people') || tags.includes('face') || tags.includes('portrait');
         const hasRelevantContent = tags.includes(query.toLowerCase().split(' ')[0]) || tags.includes(query.toLowerCase().split(' ')[1]);
         
+        // Check if this is a wealth-related query
+        const isWealthQuery = query.toLowerCase().includes('luxury') || query.toLowerCase().includes('wealth') || 
+                             query.toLowerCase().includes('mansion') || query.toLowerCase().includes('expensive') ||
+                             query.toLowerCase().includes('money') || query.toLowerCase().includes('lifestyle') ||
+                             query.toLowerCase().includes('yacht') || query.toLowerCase().includes('jewelry');
+        
         // Score based on relevance
         let score = 0;
-        if (hasPerson) score += 2;
-        if (hasRelevantContent) score += 1;
+        if (hasRelevantContent) score += 2; // Always prioritize relevant content
+        
+        // For wealth queries, don't prioritize people; for others, prioritize people
+        if (!isWealthQuery && hasPerson) score += 2;
+        if (isWealthQuery && !hasPerson) score += 1; // Slightly prefer non-person images for wealth
+        
         if (hit.likes > 10) score += 1; // Popular images
         
         return score >= 2; // Only return images with decent relevance
@@ -154,8 +164,10 @@ export function getCategorySearchTerm(categoryName) {
     'knowledge': 'educated person learning growth',
     
     // Additional Common Categories
-    'abundance': 'successful person prosperity wealth',
-    'prosperity': 'successful person abundance wealth',
+    'abundance': 'luxury car mansion wealth lifestyle yacht jewelry',
+    'prosperity': 'luxury mansion wealth lifestyle yacht jewelry',
+    'wealth': 'luxury mansion expensive car money yacht jewelry',
+    'money': 'luxury mansion expensive car wealth yacht jewelry',
     'freedom': 'liberated person independence joy',
     'independence': 'autonomous person freedom strength',
     'leadership': 'leader person guidance confidence',
@@ -233,9 +245,13 @@ export async function getRandomImageForCategory(categoryName) {
         }
       }
       
-      // Last resort: very specific positive person-focused search
-      console.log('Trying fallback search: "confident person achievement"');
-      const fallbackImages = await fetchImagesFromPixabay('confident person achievement', 10);
+      // Last resort: category-specific fallback search
+      let fallbackTerm = 'confident person achievement';
+      if (categoryName.toLowerCase().includes('abundance') || categoryName.toLowerCase().includes('prosperity') || categoryName.toLowerCase().includes('wealth') || categoryName.toLowerCase().includes('money')) {
+        fallbackTerm = 'luxury mansion wealth lifestyle yacht jewelry';
+      }
+      console.log(`Trying fallback search: "${fallbackTerm}"`);
+      const fallbackImages = await fetchImagesFromPixabay(fallbackTerm, 10);
       if (fallbackImages.length > 0) {
         const selectedImage = fallbackImages[0];
         markImageAsUsed(selectedImage);
@@ -391,8 +407,10 @@ function getAlternativeSearchTerms(categoryName) {
     'knowledge': ['educated person', 'learning growth', 'person knowledge'],
     
     // Additional Categories
-    'abundance': ['successful person', 'prosperity wealth', 'person abundance'],
-    'prosperity': ['successful person', 'abundance wealth', 'person prosperity'],
+    'abundance': ['luxury mansion', 'wealth lifestyle', 'expensive car', 'yacht', 'jewelry'],
+    'prosperity': ['luxury mansion', 'wealth lifestyle', 'expensive car', 'yacht', 'jewelry'],
+    'wealth': ['luxury mansion', 'expensive car', 'money lifestyle', 'yacht', 'jewelry'],
+    'money': ['luxury mansion', 'expensive car', 'wealth lifestyle', 'yacht', 'jewelry'],
     'freedom': ['liberated person', 'independence joy', 'person freedom'],
     'independence': ['autonomous person', 'freedom strength', 'person independence'],
     'leadership': ['leader person', 'guidance confidence', 'person leadership'],
