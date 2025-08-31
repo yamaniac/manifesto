@@ -50,8 +50,8 @@ export async function fetchImagesFromPixabay(query, perPage = 3) {
         // Check if this is a wealth-related query
         const isWealthQuery = query.toLowerCase().includes('luxury') || query.toLowerCase().includes('wealth') || 
                              query.toLowerCase().includes('mansion') || query.toLowerCase().includes('expensive') ||
-                             query.toLowerCase().includes('money') || query.toLowerCase().includes('lifestyle') ||
-                             query.toLowerCase().includes('yacht') || query.toLowerCase().includes('jewelry');
+                             query.toLowerCase().includes('money') || query.toLowerCase().includes('home') ||
+                             query.toLowerCase().includes('property');
         
         // Score based on relevance
         let score = 0;
@@ -164,10 +164,10 @@ export function getCategorySearchTerm(categoryName) {
     'knowledge': 'educated person learning growth',
     
     // Additional Common Categories
-    'abundance': 'luxury car mansion wealth lifestyle yacht jewelry',
-    'prosperity': 'luxury mansion wealth lifestyle yacht jewelry',
-    'wealth': 'luxury mansion expensive car money yacht jewelry',
-    'money': 'luxury mansion expensive car wealth yacht jewelry',
+    'abundance': 'luxury mansion money wealth lifestyle',
+    'prosperity': 'luxury mansion money wealth lifestyle',
+    'wealth': 'luxury mansion money expensive home',
+    'money': 'luxury mansion money expensive home',
     'freedom': 'liberated person independence joy',
     'independence': 'autonomous person freedom strength',
     'leadership': 'leader person guidance confidence',
@@ -248,7 +248,7 @@ export async function getRandomImageForCategory(categoryName) {
       // Last resort: category-specific fallback search
       let fallbackTerm = 'confident person achievement';
       if (categoryName.toLowerCase().includes('abundance') || categoryName.toLowerCase().includes('prosperity') || categoryName.toLowerCase().includes('wealth') || categoryName.toLowerCase().includes('money')) {
-        fallbackTerm = 'luxury mansion wealth lifestyle yacht jewelry';
+        fallbackTerm = 'luxury mansion money expensive home';
       }
       console.log(`Trying fallback search: "${fallbackTerm}"`);
       const fallbackImages = await fetchImagesFromPixabay(fallbackTerm, 10);
@@ -407,10 +407,10 @@ function getAlternativeSearchTerms(categoryName) {
     'knowledge': ['educated person', 'learning growth', 'person knowledge'],
     
     // Additional Categories
-    'abundance': ['luxury mansion', 'wealth lifestyle', 'expensive car', 'yacht', 'jewelry'],
-    'prosperity': ['luxury mansion', 'wealth lifestyle', 'expensive car', 'yacht', 'jewelry'],
-    'wealth': ['luxury mansion', 'expensive car', 'money lifestyle', 'yacht', 'jewelry'],
-    'money': ['luxury mansion', 'expensive car', 'wealth lifestyle', 'yacht', 'jewelry'],
+    'abundance': ['luxury mansion', 'money wealth', 'luxury home', 'expensive property'],
+    'prosperity': ['luxury mansion', 'money wealth', 'luxury home', 'expensive property'],
+    'wealth': ['luxury mansion', 'money', 'luxury home', 'expensive property'],
+    'money': ['luxury mansion', 'money', 'luxury home', 'expensive property'],
     'freedom': ['liberated person', 'independence joy', 'person freedom'],
     'independence': ['autonomous person', 'freedom strength', 'person independence'],
     'leadership': ['leader person', 'guidance confidence', 'person leadership'],
