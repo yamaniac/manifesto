@@ -11,12 +11,14 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Plus, Edit, Trash2, Heart, MessageSquare, Filter, Star } from 'lucide-react';
+import { ArrowLeft, Plus, Edit, Trash2, Heart, MessageSquare, Filter, Star, Image, RefreshCw, Lock } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { useToast } from '@/components/ui/toast';
 
 export default function AffirmationsPage() {
   const { user, loading, isSuperAdmin } = useAuth();
   const router = useRouter();
+  const { showToast, ToastContainer } = useToast();
   const [affirmations, setAffirmations] = useState([]);
   const [categories, setCategories] = useState([]);
   const [filteredAffirmations, setFilteredAffirmations] = useState([]);
@@ -28,6 +30,10 @@ export default function AffirmationsPage() {
     text: '',
     category_id: 'none'
   });
+  const [isImageLoading, setIsImageLoading] = useState(false);
+  const [selectedAffirmations, setSelectedAffirmations] = useState(new Set());
+  const [isBulkLoading, setIsBulkLoading] = useState(false);
+  const [imageModal, setImageModal] = useState({ isOpen: false, image: null });
 
   const supabase = createClient();
 
@@ -177,15 +183,163 @@ export default function AffirmationsPage() {
         .eq('id', affirmation.id);
 
       if (error) throw error;
-      loadAffirmations();
+      // Update local state instead of reloading everything
+      updateAffirmationInState(affirmation.id, { is_favorite: !affirmation.is_favorite });
     } catch (error) {
       console.error('Error updating favorite:', error);
+    }
+  };
+
+  const fetchAndStoreImage = async (affirmation) => {
+    if (!affirmation.categories?.name) {
+      showToast('Please select a category for this affirmation to fetch an image', 'info');
+      return;
+    }
+
+    setIsImageLoading(true);
+    try {
+      const response = await fetch('/api/affirmations/images', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          affirmationId: affirmation.id,
+          categoryName: affirmation.categories.name,
+          affirmationText: affirmation.text
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch image');
+      }
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Update the affirmation in local state with the new image
+        updateAffirmationInState(affirmation.id, {
+          image_url: result.image.url,
+          image_alt_text: result.image.alt_text
+        });
+        showToast('Image successfully added!', 'success');
+      }
+    } catch (error) {
+      console.error('Error fetching image:', error);
+      showToast('Error fetching image: ' + error.message, 'error');
+    } finally {
+      setIsImageLoading(false);
+    }
+  };
+
+  const toggleAffirmationSelection = (affirmationId) => {
+    const newSelected = new Set(selectedAffirmations);
+    if (newSelected.has(affirmationId)) {
+      newSelected.delete(affirmationId);
+    } else {
+      newSelected.add(affirmationId);
+    }
+    setSelectedAffirmations(newSelected);
+  };
+
+  const selectAllAffirmations = () => {
+    const allIds = filteredAffirmations.map(a => a.id);
+    setSelectedAffirmations(new Set(allIds));
+  };
+
+  const clearSelection = () => {
+    setSelectedAffirmations(new Set());
+  };
+
+  const updateAffirmationInState = (affirmationId, updates) => {
+    setAffirmations(prev => prev.map(aff => 
+      aff.id === affirmationId ? { ...aff, ...updates } : aff
+    ));
+  };
+
+  const bulkFetchImages = async () => {
+    if (selectedAffirmations.size === 0) {
+      showToast('Please select affirmations to fetch images for', 'info');
+      return;
+    }
+
+    const selectedAffirmationsList = filteredAffirmations.filter(a => selectedAffirmations.has(a.id));
+    const affirmationsWithCategories = selectedAffirmationsList.filter(a => a.categories?.name);
+    const affirmationsWithoutCategories = selectedAffirmationsList.filter(a => !a.categories?.name);
+
+    if (affirmationsWithoutCategories.length > 0) {
+      const names = affirmationsWithoutCategories.map(a => a.text.substring(0, 30) + '...').join(', ');
+      showToast(`${affirmationsWithoutCategories.length} affirmations don't have categories and will be skipped: ${names}`, 'info');
+    }
+
+    if (affirmationsWithCategories.length === 0) {
+      showToast('No selected affirmations have categories assigned', 'info');
+      return;
+    }
+
+    setIsBulkLoading(true);
+    showToast(`Starting bulk image fetch for ${affirmationsWithCategories.length} affirmations...`, 'info');
+    let successCount = 0;
+    let errorCount = 0;
+
+    try {
+      for (const affirmation of affirmationsWithCategories) {
+        try {
+          const response = await fetch('/api/affirmations/images', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              affirmationId: affirmation.id,
+              categoryName: affirmation.categories.name,
+              affirmationText: affirmation.text
+            }),
+          });
+
+          if (response.ok) {
+            successCount++;
+          } else {
+            errorCount++;
+            console.error(`Failed to fetch image for affirmation ${affirmation.id}`);
+          }
+        } catch (error) {
+          errorCount++;
+          console.error(`Error fetching image for affirmation ${affirmation.id}:`, error);
+        }
+      }
+
+      // Reload affirmations to show all new images
+      await loadAffirmations();
+      
+      // Clear selection after bulk operation
+      setSelectedAffirmations(new Set());
+      
+      // Show success toast
+      showToast(`Bulk image fetch completed! ✅ ${successCount} successful, ❌ ${errorCount} errors`, 'success');
+    } catch (error) {
+      console.error('Error in bulk image fetch:', error);
+      showToast('Error in bulk image fetch: ' + error.message, 'error');
+    } finally {
+      setIsBulkLoading(false);
     }
   };
 
   const resetForm = () => {
     setFormData({ text: '', category_id: 'none' });
     setEditingAffirmation(null);
+  };
+
+  const openImageModal = (imageUrl, altText) => {
+    setImageModal({
+      isOpen: true,
+      image: { url: imageUrl, alt: altText }
+    });
+  };
+
+  const closeImageModal = () => {
+    setImageModal({ isOpen: false, image: null });
   };
 
   const getCharacterCount = () => formData.text.length;
@@ -223,7 +377,7 @@ export default function AffirmationsPage() {
   }
 
   // Check if user has super admin access
-  if (!isSuperAdmin()) {
+  if (!isSuperAdmin) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
         <div className="container mx-auto p-8">
@@ -235,7 +389,7 @@ export default function AffirmationsPage() {
                 <p className="text-muted-foreground mb-4">
                   You need super admin privileges to manage affirmations.
                 </p>
-                <Button onClick={() => router.push('/admin')} variant="outline">
+                <Button onClick={() => router.push('/admin/dashboard')} variant="outline">
                   <ArrowLeft className="mr-2 h-4 w-4" />
                   Back to Admin
                 </Button>
@@ -260,6 +414,14 @@ export default function AffirmationsPage() {
             <p className="text-muted-foreground mt-1">
               Super Admin: Create and organize system affirmations
             </p>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => openImageModal('https://picsum.photos/400/300', 'Test Image')}
+              className="mt-2"
+            >
+              Test Modal
+            </Button>
           </div>
           <div className="flex gap-2">
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -342,9 +504,9 @@ export default function AffirmationsPage() {
                 </form>
               </DialogContent>
             </Dialog>
-            <Button onClick={() => router.push('/')} variant="outline">
+            <Button onClick={() => router.push('/admin/dashboard')} variant="outline">
               <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Dashboard
+              Back to Admin
             </Button>
           </div>
         </div>
@@ -381,6 +543,64 @@ export default function AffirmationsPage() {
           </CardContent>
         </Card>
 
+        {/* Bulk Operations */}
+        {filteredAffirmations.length > 0 && (
+          <Card className="mb-6">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedAffirmations.size === filteredAffirmations.length && filteredAffirmations.length > 0}
+                      onChange={selectAllAffirmations}
+                      className="h-4 w-4 rounded border-gray-300"
+                    />
+                    <Label className="text-sm font-medium">
+                      Select All ({selectedAffirmations.size}/{filteredAffirmations.length})
+                    </Label>
+                  </div>
+                  {selectedAffirmations.size > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={clearSelection}
+                    >
+                      Clear Selection
+                    </Button>
+                  )}
+                </div>
+                {selectedAffirmations.size > 0 && (
+                  <Button
+                    onClick={bulkFetchImages}
+                    disabled={isBulkLoading}
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    {isBulkLoading ? (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                        Fetching Images...
+                      </>
+                    ) : (
+                      <>
+                        <Image className="mr-2 h-4 w-4" />
+                        Bulk Fetch Images ({selectedAffirmations.size})
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
+              {selectedAffirmations.size > 0 && (
+                <div className="mt-3 text-sm text-muted-foreground">
+                  <p>📋 <strong>{selectedAffirmations.size}</strong> affirmations selected</p>
+                  <p>🎯 Only affirmations with categories will get images</p>
+                  <p>⏱️ This may take a few moments for large selections</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         {/* Affirmations Table */}
         <Card>
           <CardHeader>
@@ -413,6 +633,15 @@ export default function AffirmationsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-12">
+                      <input
+                        type="checkbox"
+                        checked={selectedAffirmations.size === filteredAffirmations.length && filteredAffirmations.length > 0}
+                        onChange={selectAllAffirmations}
+                        className="h-4 w-4 rounded border-gray-300"
+                      />
+                    </TableHead>
+                    <TableHead>Image</TableHead>
                     <TableHead>Affirmation</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Created</TableHead>
@@ -421,7 +650,62 @@ export default function AffirmationsPage() {
                 </TableHeader>
                 <TableBody>
                   {filteredAffirmations.map((affirmation) => (
-                    <TableRow key={affirmation.id}>
+                    <TableRow 
+                      key={affirmation.id}
+                      className={selectedAffirmations.has(affirmation.id) ? 'bg-blue-50 dark:bg-blue-950/20' : ''}
+                    >
+                      <TableCell className="w-12">
+                        <input
+                          type="checkbox"
+                          checked={selectedAffirmations.has(affirmation.id)}
+                          onChange={() => toggleAffirmationSelection(affirmation.id)}
+                          className="h-4 w-4 rounded border-gray-300"
+                        />
+                      </TableCell>
+                      <TableCell className="w-24">
+                        <div className="flex flex-col items-center gap-2">
+                          {affirmation.image_url ? (
+                            <div className="relative">
+                              <img
+                                src={affirmation.image_url}
+                                alt={affirmation.image_alt_text || 'Affirmation image'}
+                                className="w-16 h-16 object-cover rounded-lg border-2 border-gray-200 cursor-pointer hover:opacity-80 transition-opacity"
+                                onClick={() => openImageModal(affirmation.image_url, affirmation.image_alt_text)}
+                                title="Click to view full size"
+                              />
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => fetchAndStoreImage(affirmation)}
+                                className="absolute -top-2 -right-2 p-1 h-6 w-6 bg-white border border-gray-200 rounded-full shadow-sm hover:bg-gray-50"
+                                title="Refresh image"
+                              >
+                                <RefreshCw className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="w-16 h-16 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
+                              <Image className="h-6 w-6 text-gray-400" />
+                            </div>
+                          )}
+                          {!affirmation.image_url && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => fetchAndStoreImage(affirmation)}
+                              disabled={isImageLoading || !affirmation.categories?.name}
+                              className="text-xs"
+                            >
+                              {isImageLoading ? (
+                                <RefreshCw className="h-3 w-3 animate-spin mr-1" />
+                              ) : (
+                                <Image className="h-3 w-3 mr-1" />
+                              )}
+                              Add Image
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="max-w-md">
                         <div className="flex items-start gap-2">
                           <Button
@@ -491,6 +775,42 @@ export default function AffirmationsPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Image Modal */}
+        <Dialog open={imageModal.isOpen} onOpenChange={closeImageModal}>
+          <DialogContent className="max-w-4xl max-h-[90vh] p-0 overflow-hidden">
+            <DialogHeader className="p-6 pb-4">
+              <DialogTitle>Affirmation Image</DialogTitle>
+              <DialogDescription>
+                {imageModal.image?.alt || 'View your affirmation image in full size'}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="px-6 pb-6">
+              {imageModal.image && (
+                <div className="relative">
+                  <img
+                    src={imageModal.image.url}
+                    alt={imageModal.image.alt}
+                    className="w-full h-auto max-h-[70vh] object-contain rounded-lg shadow-lg"
+                  />
+                  <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
+                    <span>Click outside or press ESC to close</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={closeImageModal}
+                    >
+                      Close
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+        
+        {/* Toast Container */}
+        <ToastContainer />
       </div>
     </div>
   );

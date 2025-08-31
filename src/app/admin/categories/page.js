@@ -138,7 +138,7 @@ export default function CategoriesPage() {
     );
   }
 
-  if (!isSuperAdmin()) {
+  if (!user || !isSuperAdmin) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
         <div className="container mx-auto p-8">
@@ -150,7 +150,7 @@ export default function CategoriesPage() {
                 <p className="text-muted-foreground mb-4">
                   You need super admin privileges to manage categories.
                 </p>
-                <Button onClick={() => router.push('/admin')} variant="outline">
+                <Button onClick={() => router.push('/admin/dashboard')} variant="outline">
                   <ArrowLeft className="mr-2 h-4 w-4" />
                   Back to Admin
                 </Button>
@@ -249,7 +249,7 @@ export default function CategoriesPage() {
                 </form>
               </DialogContent>
             </Dialog>
-            <Button onClick={() => router.push('/admin')} variant="outline">
+            <Button onClick={() => router.push('/admin/dashboard')} variant="outline">
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back to Admin
             </Button>

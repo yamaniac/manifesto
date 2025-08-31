@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 const AuthContext = createContext({});
@@ -16,37 +16,100 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuperAdminUser, setIsSuperAdminUser] = useState(false);
+  const [userRoles, setUserRoles] = useState([]);
+  const [primaryRole, setPrimaryRole] = useState(null);
   const supabase = createClient();
 
+  // Simplified role fetching without async operations in useEffect
+  const updateUserRoles = useCallback((currentUser) => {
+    if (!currentUser) {
+      setUserRoles([]);
+      setPrimaryRole(null);
+      return;
+    }
+
+    // For now, set default roles for temp admin access
+    setUserRoles(['super_admin']);
+    setPrimaryRole('super_admin');
+  }, []);
+
   useEffect(() => {
-    // Get initial session
-    const getSession = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
+    let isMounted = true;
+
+    const initializeAuth = () => {
+      // Get initial session synchronously
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (!isMounted) return;
+        
         const currentUser = session?.user ?? null;
         setUser(currentUser);
-        setLoading(false);
-      } catch (error) {
+        
+        if (currentUser) {
+          console.log('🔍 Setting temp admin access for user:', currentUser.email);
+          
+          // TEMPORARY: Give admin access to any authenticated user for setup
+          setIsAdmin(true);
+          setIsSuperAdminUser(true);
+          
+          // Update user roles
+          updateUserRoles(currentUser);
+        } else {
+          setIsAdmin(false);
+          setIsSuperAdminUser(false);
+          setUserRoles([]);
+          setPrimaryRole(null);
+        }
+        
+        if (isMounted) {
+          setLoading(false);
+        }
+      }).catch((error) => {
         console.error('Error getting session:', error);
-        setLoading(false);
-      }
+        if (isMounted) {
+          setLoading(false);
+        }
+      });
     };
 
-    getSession();
+    initializeAuth();
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
+        if (!isMounted) return;
+        
         const currentUser = session?.user ?? null;
         setUser(currentUser);
-        setLoading(false);
+        
+        if (currentUser) {
+          console.log('🔍 Setting temp admin access for user:', currentUser.email);
+          
+          // TEMPORARY: Give admin access to any authenticated user for setup
+          setIsAdmin(true);
+          setIsSuperAdminUser(true);
+          
+          // Update user roles
+          updateUserRoles(currentUser);
+        } else {
+          setIsAdmin(false);
+          setIsSuperAdminUser(false);
+          setUserRoles([]);
+          setPrimaryRole(null);
+        }
+        
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     );
 
     return () => {
+      isMounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [supabase, updateUserRoles]);
 
   const signIn = async (email, password) => {
     try {
@@ -71,17 +134,21 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Simple role checking - everyone is admin for now
-  const isSuperAdmin = () => true;
-  const isAdmin = () => true;
-  const isUser = () => true;
-  const hasRole = () => true;
-  const getPrimaryRole = () => 'super_admin';
+  // Synchronous role functions
+  const getPrimaryRole = () => {
+    if (user && isSuperAdminUser) {
+      return primaryRole || 'super_admin';
+    }
+    return primaryRole;
+  };
+
+  const getUserRoles = () => {
+    return userRoles;
+  };
 
   // Simple user management functions
   const getAllUsers = async () => {
     try {
-      // Just return a simple user list for now
       return { 
         data: [
           {
@@ -112,16 +179,25 @@ export const AuthProvider = ({ children }) => {
     loading,
     signIn,
     signOut,
-    isSuperAdmin,
+    // Synchronous state variables
     isAdmin,
-    isUser,
-    hasRole,
+    isSuperAdmin: isSuperAdminUser,
+    // Synchronous role functions
     getPrimaryRole,
+    getUserRoles,
+    // User management functions
     getAllUsers,
     assignRole,
     removeRole,
     supabase,
   };
+
+  console.log('🔍 AuthContext value:', { 
+    user: user ? { id: user.id, email: user.email } : null, 
+    isAdmin, 
+    isSuperAdmin: isSuperAdminUser,
+    loading 
+  });
 
   return (
     <AuthContext.Provider value={value}>

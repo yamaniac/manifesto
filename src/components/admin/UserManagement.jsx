@@ -37,11 +37,11 @@ export default function UserManagement() {
 
   useEffect(() => {
     // Only fetch users once when component mounts and user is super admin
-    if (isSuperAdmin() && !hasInitialized) {
+    if (isSuperAdmin && !hasInitialized) {
       setHasInitialized(true);
       fetchUsers();
     }
-  }, [hasInitialized]); // Only depend on hasInitialized to prevent infinite loops
+  }, [hasInitialized, isSuperAdmin]); // Only depend on hasInitialized to prevent infinite loops
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -148,7 +148,7 @@ export default function UserManagement() {
     }
   };
 
-  if (!isSuperAdmin()) {
+  if (!isSuperAdmin) {
     return (
       <Card>
         <CardContent className="p-6">

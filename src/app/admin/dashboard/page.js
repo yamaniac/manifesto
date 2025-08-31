@@ -1,18 +1,27 @@
 'use client';
 
+import { useState } from 'react';
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import UserManagement from '@/components/admin/UserManagement';
 import { useRouter } from "next/navigation";
-import { Shield, Crown, Users, ArrowLeft, Database, Lock, Tag, MessageSquare } from 'lucide-react';
+import { Shield, Crown, Users, ArrowLeft, Database, Lock, Tag, MessageSquare, Image, HardDrive, RefreshCw } from 'lucide-react';
 
 export default function AdminDashboard() {
   const { user, isSuperAdmin, getPrimaryRole, loading, signOut } = useAuth();
   const router = useRouter();
+  const [isStorageInitializing, setIsStorageInitializing] = useState(false);
+
+  console.log('🔍 AdminDashboard received:', { 
+    user: user ? { id: user.id, email: user.email } : null, 
+    isSuperAdmin, 
+    loading 
+  });
 
   if (loading) {
+    console.log('🔄 Dashboard loading...');
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
@@ -20,7 +29,36 @@ export default function AdminDashboard() {
     );
   }
 
-  if (!isSuperAdmin()) {
+  const initializeStorage = async () => {
+    setIsStorageInitializing(true);
+    try {
+      const response = await fetch('/api/storage/init', {
+        method: 'POST',
+      });
+      
+      if (response.ok) {
+        alert('Storage bucket initialized successfully!');
+      } else {
+        const errorData = await response.json();
+        alert('Error initializing storage: ' + (errorData.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Error initializing storage:', error);
+      alert('Error initializing storage: ' + error.message);
+    } finally {
+      setIsStorageInitializing(false);
+    }
+  };
+
+  if (!user || !isSuperAdmin) {
+    console.log('🚫 Access denied - Debug:', { 
+      userExists: !!user, 
+      userEmail: user?.email,
+      isSuperAdmin, 
+      loading,
+      userType: typeof user,
+      userValue: user
+    });
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
         <div className="container mx-auto p-8">
@@ -44,6 +82,8 @@ export default function AdminDashboard() {
     );
   }
 
+  console.log('✅ Dashboard rendering - user and admin access confirmed');
+  
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
       <div className="container mx-auto p-8">
@@ -85,7 +125,7 @@ export default function AdminDashboard() {
                   <p className="text-sm text-muted-foreground">Primary Role</p>
                   <Badge variant="destructive" className="flex items-center gap-1 w-fit">
                     <Crown className="h-3 w-3" />
-                    {getPrimaryRole()}
+                    {getPrimaryRole() || 'super_admin'}
                   </Badge>
                 </div>
                 <div>
@@ -160,6 +200,40 @@ export default function AdminDashboard() {
                   <MessageSquare className="mr-2 h-4 w-4" />
                   Affirmations
                 </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <HardDrive className="h-5 w-5" />
+                Storage Management
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Image Storage</span>
+                  <Badge variant="outline" className="text-xs">Affirmation Images</Badge>
+                </div>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="w-full justify-start"
+                  onClick={initializeStorage}
+                  disabled={isStorageInitializing}
+                >
+                  {isStorageInitializing ? (
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Image className="mr-2 h-4 w-4" />
+                  )}
+                  {isStorageInitializing ? 'Initializing...' : 'Initialize Storage'}
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Creates storage bucket for affirmation images
+                </p>
               </div>
             </CardContent>
           </Card>

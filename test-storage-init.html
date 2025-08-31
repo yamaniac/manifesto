@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Storage Initialization</title>
+</head>
+<body>
+    <h1>Test Storage Initialization</h1>
+    <button onclick="initStorage()">Initialize Storage</button>
+    <div id="result"></div>
+
+    <script>
+        async function initStorage() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = 'Initializing storage...';
+            
+            try {
+                const response = await fetch('http://localhost:3001/api/storage/init', {
+                    method: 'POST',
+                });
+                
+                const text = await response.text();
+                console.log('Response status:', response.status);
+                console.log('Response text:', text);
+                
+                try {
+                    const json = JSON.parse(text);
+                    resultDiv.innerHTML = `<pre>Success: ${JSON.stringify(json, null, 2)}</pre>`;
+                } catch (parseError) {
+                    resultDiv.innerHTML = `<pre>Error parsing JSON: ${parseError.message}\n\nRaw response:\n${text}</pre>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<pre>Fetch error: ${error.message}</pre>`;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -59,6 +59,8 @@ export async function updateSession(request) {
              request.headers.get('x-real-ip') || 
              'unknown';
   
+  console.log('🔒 Middleware executing for:', request.nextUrl.pathname);
+  
   // Check rate limiting
   if (!checkRateLimit(ip)) {
     return new NextResponse('Too Many Requests', { 
@@ -114,6 +116,8 @@ export async function updateSession(request) {
       data: { user },
     } = await supabase.auth.getUser();
 
+    console.log('👤 User auth status:', user ? 'Authenticated' : 'Not authenticated');
+
     // Additional security checks
     if (user) {
       // Check if user is banned or suspended (you can implement this logic)
@@ -123,13 +127,27 @@ export async function updateSession(request) {
       // }
     }
 
-    // Protected routes that require authentication
+    // Define all route types
     const protectedRoutes = ['/admin', '/affirmations'];
+    const publicRoutes = ['/login', '/auth', '/'];
+    
     const isProtectedRoute = protectedRoutes.some(route => 
       request.nextUrl.pathname.startsWith(route)
     );
+    const isPublicRoute = publicRoutes.some(route => 
+      request.nextUrl.pathname.startsWith(route)
+    );
 
+    console.log('🛡️ Route protection check:', {
+      path: request.nextUrl.pathname,
+      isProtected: isProtectedRoute,
+      isPublic: isPublicRoute,
+      hasUser: !!user
+    });
+
+    // Check if current route is protected
     if (isProtectedRoute && !user) {
+      console.log('🚫 Redirecting to login - protected route without auth');
       const url = request.nextUrl.clone();
       url.pathname = '/login';
       url.searchParams.set('redirect', request.nextUrl.pathname);
@@ -166,12 +184,6 @@ export async function updateSession(request) {
       }
     }
 
-    // Public routes that don't require authentication
-    const publicRoutes = ['/login', '/auth', '/'];
-    const isPublicRoute = publicRoutes.some(route => 
-      request.nextUrl.pathname.startsWith(route)
-    );
-
     // Redirect authenticated users away from login page
     if (isPublicRoute && user && request.nextUrl.pathname === '/login') {
       const url = request.nextUrl.clone();
@@ -179,15 +191,20 @@ export async function updateSession(request) {
       return NextResponse.redirect(url);
     }
 
-    // If no user and not on public routes, redirect to login
+    // IMPORTANT: All routes that are not explicitly public require authentication
+    // This ensures /affirmations and any other routes are protected by default
     if (!user && !isPublicRoute) {
+      console.log('🚫 Redirecting to login - not public route without auth');
       const url = request.nextUrl.clone();
       url.pathname = '/login';
+      url.searchParams.set('redirect', request.nextUrl.pathname);
       return NextResponse.redirect(url);
     }
 
+    console.log('✅ Route access allowed');
+
   } catch (error) {
-    console.error('Middleware error:', error);
+    console.error('❌ Middleware error:', error);
     // On error, redirect to login for security
     const url = request.nextUrl.clone();
     url.pathname = '/login';
