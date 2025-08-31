@@ -12,6 +12,23 @@ const compat = new FlatCompat({
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals"),
   {
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: {
+        // Browser globals
+        window: "readonly",
+        document: "readonly",
+        console: "readonly",
+        // Node.js globals
+        process: "readonly",
+        Buffer: "readonly",
+        __dirname: "readonly",
+        __filename: "readonly",
+        // Supabase global
+        supabase: "readonly",
+      },
+    },
     rules: {
       // Security rules
       "no-eval": "error",
@@ -45,15 +62,6 @@ const eslintConfig = [
       "curly": "error",
       "no-multiple-empty-lines": "warn",
       "no-trailing-spaces": "warn",
-    },
-    env: {
-      browser: true,
-      es2022: true,
-      node: true,
-    },
-    globals: {
-      // Supabase global
-      supabase: "readonly",
     },
   },
 ];
