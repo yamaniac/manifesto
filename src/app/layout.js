@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "Manifesto - Your App",
-  description: "A modern app with Supabase authentication",
+  title: "Goshme.com",
+  description: "Goshme - apps to help you live better",
 };
 
 export default function RootLayout({ children }) {

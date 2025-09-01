@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Manifesto
 
-## Getting Started
+A Next.js application for managing affirmations with AI-powered image generation and manual image upload capabilities.
 
-First, run the development server:
+## Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **Affirmations Management**: Create, edit, and organize positive affirmations
+- **AI Image Generation**: Automatically fetch relevant images from Pixabay based on categories
+- **Manual Image Upload**: Upload custom images for affirmations
+- **Category Management**: Organize affirmations with color-coded categories
+- **Super Admin Access**: Comprehensive management interface for administrators
+
+## Database Setup
+
+### Required Fields for Affirmations Table
+
+The affirmations table needs the following additional fields for image functionality:
+
+```sql
+-- Add these fields to your affirmations table if they don't exist
+ALTER TABLE affirmations 
+ADD COLUMN image_url TEXT,
+ADD COLUMN image_alt_text TEXT,
+ADD COLUMN is_manual_image BOOLEAN DEFAULT false;
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Storage Setup
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+Initialize the storage bucket for affirmation images:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. **Initialize Bucket**: Open `test-storage-init.html` in your browser and click "Initialize Storage Bucket"
+2. **Set Up RLS Policies**: After bucket creation, you MUST manually add the RLS policies in Supabase Dashboard:
+   - Go to Supabase Dashboard → Storage → Policies
+   - Select the `affirmation-images` bucket
+   - Add the 4 required policies (see `test-storage-init.html` for exact SQL)
+3. **Database Migration**: Run the SQL migration to add image fields to affirmations table
 
-## Learn More
+**Important**: The RLS policies are required for manual image uploads to work. Without them, you'll get "row violates row-level security policy" errors.
 
-To learn more about Next.js, take a look at the following resources:
+## Development
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Install dependencies: `npm install`
+2. Set up your Supabase environment variables
+3. Run the database migration
+4. Initialize storage bucket
+5. Start development server: `npm run dev`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## API Endpoints
 
-## Deploy on Vercel
+- `POST /api/affirmations/images` - Fetch AI-generated images from Pixabay
+- `POST /api/storage/init` - Initialize storage bucket
+- `POST /api/auth/callback` - Authentication callback
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Image Management
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Automatic Images**: Fetched from Pixabay based on category and affirmation text
+- **Manual Images**: Upload custom images with automatic compression
+- **Image Compression**: 
+  - Automatic compression to 1MB max file size
+  - Max resolution: 1920px (width or height)
+  - Real-time compression progress indicator
+  - File size savings display
+- **Image Controls**: 
+  - Refresh button for AI-generated images
+  - Delete button for manually uploaded images
+  - Upload icon for adding custom images
+- **Smart Refresh**: Refresh button is disabled for manually uploaded images until deleted
+- **Supported Formats**: JPG, PNG, WebP, GIF (original max 5MB, compressed to 1MB)

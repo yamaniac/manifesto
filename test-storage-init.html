@@ -1,12 +1,82 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Test Storage Initialization</title>
+    <title>Storage Initialization & Setup</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .step { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .code { background: #f5f5f5; padding: 10px; border-radius: 3px; font-family: monospace; margin: 10px 0; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+    </style>
 </head>
 <body>
-    <h1>Test Storage Initialization</h1>
-    <button onclick="initStorage()">Initialize Storage</button>
-    <div id="result"></div>
+    <h1>Storage Initialization & Setup</h1>
+    
+    <div class="step">
+        <h2>Step 1: Initialize Storage Bucket</h2>
+        <button onclick="initStorage()">Initialize Storage Bucket</button>
+        <div id="result"></div>
+    </div>
+
+    <div class="step">
+        <h2>Step 2: Set Up Storage Policies (Required)</h2>
+        <p class="warning">After initializing the bucket, you MUST set up the RLS policies manually in Supabase Dashboard.</p>
+        
+        <h3>Go to Supabase Dashboard:</h3>
+        <ol>
+            <li>Open your Supabase project dashboard</li>
+            <li>Go to <strong>Storage</strong> → <strong>Policies</strong></li>
+            <li>Select the <code>affirmation-images</code> bucket</li>
+            <li>Add the following policies:</li>
+        </ol>
+
+        <div class="code">
+CREATE POLICY "Authenticated users can upload affirmation images"<br>
+ON storage.objects FOR INSERT<br>
+WITH CHECK (<br>
+&nbsp;&nbsp;bucket_id = 'affirmation-images' <br>
+&nbsp;&nbsp;AND auth.role() = 'authenticated'<br>
+);
+        </div>
+
+        <div class="code">
+CREATE POLICY "Public read access for affirmation images"<br>
+ON storage.objects FOR SELECT<br>
+USING (bucket_id = 'affirmation-images');
+        </div>
+
+        <div class="code">
+CREATE POLICY "Users can update their own affirmation images"<br>
+ON storage.objects FOR UPDATE<br>
+USING (<br>
+&nbsp;&nbsp;bucket_id = 'affirmation-images' <br>
+&nbsp;&nbsp;AND auth.role() = 'authenticated'<br>
+);
+        </div>
+
+        <div class="code">
+CREATE POLICY "Users can delete their own affirmation images"<br>
+ON storage.objects FOR DELETE<br>
+USING (<br>
+&nbsp;&nbsp;bucket_id = 'affirmation-images' <br>
+&nbsp;&nbsp;AND auth.role() = 'authenticated'<br>
+);
+        </div>
+    </div>
+
+    <div class="step">
+        <h2>Step 3: Database Migration (If Needed)</h2>
+        <p>If you haven't already, add the image fields to your affirmations table:</p>
+        <div class="code">
+ALTER TABLE affirmations <br>
+ADD COLUMN image_url TEXT,<br>
+ADD COLUMN image_alt_text TEXT,<br>
+ADD COLUMN is_manual_image BOOLEAN DEFAULT false;
+        </div>
+    </div>
 
     <script>
         async function initStorage() {
@@ -24,14 +94,19 @@
                 
                 try {
                     const json = JSON.parse(text);
-                    resultDiv.innerHTML = `<pre>Success: ${JSON.stringify(json, null, 2)}</pre>`;
+                    if (json.success) {
+                        resultDiv.innerHTML = `<div class="success"><strong>Success!</strong><br>${json.message}</div>`;
+                    } else {
+                        resultDiv.innerHTML = `<div class="error"><strong>Error:</strong><br>${json.error}</div>`;
+                    }
                 } catch (parseError) {
-                    resultDiv.innerHTML = `<pre>Error parsing JSON: ${parseError.message}\n\nRaw response:\n${text}</pre>`;
+                    resultDiv.innerHTML = `<div class="error">Error parsing JSON: ${parseError.message}<br><br>Raw response:<br>${text}</div>`;
                 }
             } catch (error) {
-                resultDiv.innerHTML = `<pre>Fetch error: ${error.message}</pre>`;
+                resultDiv.innerHTML = `<div class="error">Fetch error: ${error.message}</div>`;
             }
         }
     </script>
 </body>
 </html>
+

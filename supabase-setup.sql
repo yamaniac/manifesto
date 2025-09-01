@@ -276,6 +276,9 @@ CREATE TABLE affirmations (
     category_id UUID REFERENCES categories(id) ON DELETE SET NULL,
     created_by UUID REFERENCES auth.users(id),
     is_favorite BOOLEAN DEFAULT false,
+    image_url TEXT,
+    image_alt_text TEXT,
+    is_manual_image BOOLEAN DEFAULT false,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -314,6 +317,53 @@ CREATE POLICY "Super admins can manage all affirmations"
 CREATE TRIGGER update_affirmations_updated_at
     BEFORE UPDATE ON affirmations
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- =============================================
+-- STORAGE BUCKET SETUP
+-- =============================================
+
+-- Create storage bucket for affirmation images
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'affirmation-images',
+  'affirmation-images',
+  true,
+  5242880, -- 5MB limit
+  ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+) ON CONFLICT (id) DO NOTHING;
+
+-- =============================================
+-- STORAGE RLS POLICIES
+-- =============================================
+
+-- Allow authenticated users to upload files
+CREATE POLICY "Authenticated users can upload affirmation images"
+ON storage.objects FOR INSERT
+WITH CHECK (
+  bucket_id = 'affirmation-images' 
+  AND auth.role() = 'authenticated'
+);
+
+-- Allow public read access to all files
+CREATE POLICY "Public read access for affirmation images"
+ON storage.objects FOR SELECT
+USING (bucket_id = 'affirmation-images');
+
+-- Allow users to update their own files
+CREATE POLICY "Users can update their own affirmation images"
+ON storage.objects FOR UPDATE
+USING (
+  bucket_id = 'affirmation-images' 
+  AND auth.role() = 'authenticated'
+);
+
+-- Allow users to delete their own files
+CREATE POLICY "Users can delete their own affirmation images"
+ON storage.objects FOR DELETE
+USING (
+  bucket_id = 'affirmation-images' 
+  AND auth.role() = 'authenticated'
+);
 
 -- =============================================
 -- INITIAL SETUP COMPLETE

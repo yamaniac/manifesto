@@ -28,7 +28,7 @@ export async function initializeStorage() {
       // Create bucket with public access for images using admin client
       const { error: createError } = await supabaseAdmin.storage.createBucket(STORAGE_BUCKET, {
         public: true,
-        allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+        allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
         fileSizeLimit: 5242880 // 5MB limit
       });
       
@@ -36,10 +36,30 @@ export async function initializeStorage() {
       console.log('Storage bucket created successfully');
     }
     
+    // Set up RLS policies for the storage bucket
+    await setupStoragePolicies();
+    
     return true;
   } catch (error) {
     console.error('Error initializing storage:', error);
     return false;
+  }
+}
+
+/**
+ * Set up Row Level Security policies for the storage bucket
+ */
+async function setupStoragePolicies() {
+  try {
+    // Note: Storage policies need to be set up via SQL
+    // This function is a placeholder - the actual policies should be set up in the database
+    console.log('Storage policies should be configured in Supabase dashboard or via SQL');
+    console.log('Required policies:');
+    console.log('1. Allow authenticated users to upload files');
+    console.log('2. Allow public read access to files');
+    console.log('3. Allow users to delete their own files');
+  } catch (error) {
+    console.error('Error setting up storage policies:', error);
   }
 }
 

@@ -11,9 +11,10 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Plus, Edit, Trash2, Heart, MessageSquare, Filter, Star, Image, RefreshCw, Lock } from 'lucide-react';
+import { ArrowLeft, Plus, Edit, Trash2, Heart, MessageSquare, Filter, Star, Image, RefreshCw, Lock, Upload, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useToast } from '@/components/ui/toast';
+import imageCompression from 'browser-image-compression';
 
 export default function AffirmationsPage() {
   const { user, loading, isSuperAdmin } = useAuth();
@@ -34,6 +35,9 @@ export default function AffirmationsPage() {
   const [selectedAffirmations, setSelectedAffirmations] = useState(new Set());
   const [isBulkLoading, setIsBulkLoading] = useState(false);
   const [imageModal, setImageModal] = useState({ isOpen: false, image: null });
+  const [uploadModal, setUploadModal] = useState({ isOpen: false, affirmation: null, file: null, preview: null });
+  const [isCompressing, setIsCompressing] = useState(false);
+  const [compressionProgress, setCompressionProgress] = useState(0);
 
   const supabase = createClient();
 
@@ -342,6 +346,169 @@ export default function AffirmationsPage() {
     setImageModal({ isOpen: false, image: null });
   };
 
+  const openUploadModal = (affirmation) => {
+    setUploadModal({
+      isOpen: true,
+      affirmation: affirmation,
+      file: null,
+      preview: null
+    });
+  };
+
+  const closeUploadModal = () => {
+    setUploadModal({
+      isOpen: false,
+      affirmation: null,
+      file: null,
+      preview: null
+    });
+    setIsCompressing(false);
+    setCompressionProgress(0);
+  };
+
+  const handleFileSelect = async (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+        showToast('File size must be less than 5MB', 'error');
+        return;
+      }
+      
+      if (!file.type.startsWith('image/')) {
+        showToast('Please select an image file', 'error');
+        return;
+      }
+
+      setIsCompressing(true);
+      setCompressionProgress(0);
+
+      try {
+        // Compress the image
+        const compressedFile = await imageCompression(file, {
+          maxSizeMB: 1, // Maximum file size in MB
+          maxWidthOrHeight: 1920, // Maximum width or height
+          useWebWorker: true,
+          onProgress: (progress) => {
+            setCompressionProgress(Math.round(progress));
+          }
+        });
+
+        // Create preview from compressed file
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          setUploadModal(prev => ({
+            ...prev,
+            file: compressedFile,
+            preview: e.target.result
+          }));
+          setIsCompressing(false);
+          setCompressionProgress(0);
+          
+          // Show compression info
+          const originalSize = (file.size / 1024 / 1024).toFixed(2);
+          const compressedSize = (compressedFile.size / 1024 / 1024).toFixed(2);
+          const savings = ((1 - compressedFile.size / file.size) * 100).toFixed(1);
+          showToast(`Image compressed: ${originalSize}MB → ${compressedSize}MB (${savings}% smaller)`, 'success');
+        };
+        reader.readAsDataURL(compressedFile);
+      } catch (error) {
+        console.error('Error compressing image:', error);
+        showToast('Error compressing image: ' + error.message, 'error');
+        setIsCompressing(false);
+        setCompressionProgress(0);
+      }
+    }
+  };
+
+  const uploadManualImage = async () => {
+    if (!uploadModal.file || !uploadModal.affirmation) {
+      showToast('Please select an image file', 'error');
+      return;
+    }
+
+    try {
+      // Create a unique filename
+      const fileExt = uploadModal.file.name.split('.').pop();
+      const fileName = `manual_${uploadModal.affirmation.id}_${Date.now()}.${fileExt}`;
+      
+      // Upload to Supabase Storage directly with the file
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('affirmation-images')
+        .upload(fileName, uploadModal.file, {
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('affirmation-images')
+        .getPublicUrl(fileName);
+
+      // Update affirmation with manual image
+      const { error: updateError } = await supabase
+        .from('affirmations')
+        .update({
+          image_url: urlData.publicUrl,
+          image_alt_text: `Manual upload: ${uploadModal.affirmation.text}`,
+          is_manual_image: true
+        })
+        .eq('id', uploadModal.affirmation.id);
+
+      if (updateError) throw updateError;
+
+      // Update local state
+      updateAffirmationInState(uploadModal.affirmation.id, {
+        image_url: urlData.publicUrl,
+        image_alt_text: `Manual upload: ${uploadModal.affirmation.text}`,
+        is_manual_image: true
+      });
+
+      showToast('Image uploaded successfully!', 'success');
+      closeUploadModal();
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      showToast('Error uploading image: ' + error.message, 'error');
+    }
+  };
+
+  const deleteManualImage = async (affirmation) => {
+    if (!confirm('Are you sure you want to delete this manually uploaded image? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      // Update affirmation to remove image
+      const { error: updateError } = await supabase
+        .from('affirmations')
+        .update({
+          image_url: null,
+          image_alt_text: null,
+          is_manual_image: false
+        })
+        .eq('id', affirmation.id);
+
+      if (updateError) throw updateError;
+
+      // Update local state
+      updateAffirmationInState(affirmation.id, {
+        image_url: null,
+        image_alt_text: null,
+        is_manual_image: false
+      });
+
+      showToast('Image deleted successfully!', 'success');
+    } catch (error) {
+      console.error('Error deleting image:', error);
+      showToast('Error deleting image: ' + error.message, 'error');
+    }
+  };
+
+  const isManualImage = (affirmation) => {
+    return affirmation.is_manual_image === true;
+  };
+
   const getCharacterCount = () => formData.text.length;
   const isOverLimit = () => getCharacterCount() > 100;
 
@@ -414,14 +581,7 @@ export default function AffirmationsPage() {
             <p className="text-muted-foreground mt-1">
               Super Admin: Create and organize system affirmations
             </p>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => openImageModal('https://picsum.photos/400/300', 'Test Image')}
-              className="mt-2"
-            >
-              Test Modal
-            </Button>
+
           </div>
           <div className="flex gap-2">
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -673,15 +833,29 @@ export default function AffirmationsPage() {
                                 onClick={() => openImageModal(affirmation.image_url, affirmation.image_alt_text)}
                                 title="Click to view full size"
                               />
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => fetchAndStoreImage(affirmation)}
-                                className="absolute -top-2 -right-2 p-1 h-6 w-6 bg-white border border-gray-200 rounded-full shadow-sm hover:bg-gray-50"
-                                title="Refresh image"
-                              >
-                                <RefreshCw className="h-3 w-3" />
-                              </Button>
+                              {isManualImage(affirmation) ? (
+                                <div className="absolute -top-2 -right-2 flex gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => deleteManualImage(affirmation)}
+                                    className="p-1 h-6 w-6 bg-red-100 border border-red-200 rounded-full shadow-sm hover:bg-red-200"
+                                    title="Delete manual image"
+                                  >
+                                    <X className="h-3 w-3 text-red-600" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => fetchAndStoreImage(affirmation)}
+                                  className="absolute -top-2 -right-2 p-1 h-6 w-6 bg-white border border-gray-200 rounded-full shadow-sm hover:bg-gray-50"
+                                  title="Refresh image"
+                                >
+                                  <RefreshCw className="h-3 w-3" />
+                                </Button>
+                              )}
                             </div>
                           ) : (
                             <div className="w-16 h-16 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
@@ -704,6 +878,16 @@ export default function AffirmationsPage() {
                               Add Image
                             </Button>
                           )}
+                          {/* Upload icon - always visible */}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => openUploadModal(affirmation)}
+                            className="p-1 h-6 w-6 bg-blue-100 border border-blue-200 rounded-full shadow-sm hover:bg-blue-200"
+                            title="Upload custom image"
+                          >
+                            <Upload className="h-3 w-3 text-blue-600" />
+                          </Button>
                         </div>
                       </TableCell>
                       <TableCell className="max-w-md">
@@ -805,6 +989,114 @@ export default function AffirmationsPage() {
                   </div>
                 </div>
               )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Upload Modal */}
+        <Dialog open={uploadModal.isOpen} onOpenChange={closeUploadModal}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Upload Custom Image</DialogTitle>
+              <DialogDescription>
+                Upload a custom image for: "{uploadModal.affirmation?.text}"
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="image-upload">Select Image</Label>
+                <Input
+                  id="image-upload"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileSelect}
+                  className="mt-2"
+                  disabled={isCompressing}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Maximum file size: 5MB. Images will be automatically compressed to 1MB max with 1920px max resolution.
+                </p>
+                <div className="mt-2 p-2 bg-blue-50 rounded-md">
+                  <p className="text-xs text-blue-700">
+                    <strong>Compression Settings:</strong><br/>
+                    • Max file size: 1MB<br/>
+                    • Max resolution: 1920px (width or height)<br/>
+                    • Quality: Optimized for web display<br/>
+                    • Formats: JPG, PNG, WebP, GIF
+                  </p>
+                </div>
+                {isCompressing && (
+                  <div className="mt-2">
+                    <div className="flex items-center gap-2 text-sm text-blue-600">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                      Compressing image... {compressionProgress}%
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+                      <div 
+                        className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${compressionProgress}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {uploadModal.preview && (
+                <div>
+                  <Label>Preview</Label>
+                  <div className="mt-2 relative">
+                    <img
+                      src={uploadModal.preview}
+                      alt="Preview"
+                      className="w-full h-32 object-cover rounded-lg border border-gray-200"
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setUploadModal(prev => ({ ...prev, file: null, preview: null }))}
+                      className="absolute top-2 right-2 p-1 h-6 w-6 bg-white border border-gray-200 rounded-full shadow-sm hover:bg-gray-50"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  {uploadModal.file && (
+                    <div className="mt-2 p-2 bg-green-50 rounded-md">
+                      <p className="text-xs text-green-700">
+                        <strong>Ready to upload:</strong><br/>
+                        File size: {(uploadModal.file.size / 1024 / 1024).toFixed(2)}MB<br/>
+                        Type: {uploadModal.file.type}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-4">
+                <Button
+                  onClick={uploadManualImage}
+                  disabled={!uploadModal.file || isCompressing}
+                  className="flex-1"
+                >
+                  {isCompressing ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Compressing...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Upload Image
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={closeUploadModal}
+                  disabled={isCompressing}
+                >
+                  Cancel
+                </Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>

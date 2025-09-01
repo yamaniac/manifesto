@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,26 +15,9 @@ export default function AdminPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [debugInfo, setDebugInfo] = useState('');
   
-  const { signIn, supabase } = useAuth();
+  const { signIn } = useAuth();
   const router = useRouter();
-
-  // Debug: Check Supabase connection
-  useEffect(() => {
-    const checkConnection = async () => {
-      try {
-        const { data, error } = await supabase.auth.getSession();
-        console.log('Supabase connection test:', { data, error });
-        setDebugInfo(`Connection: ${error ? 'Failed' : 'Success'}`);
-      } catch (err) {
-        console.error('Connection test error:', err);
-        setDebugInfo(`Connection Error: ${err.message}`);
-      }
-    };
-    
-    checkConnection();
-  }, [supabase]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -43,36 +26,16 @@ export default function AdminPage() {
     setError('');
 
     try {
-      console.log('Attempting sign in with:', { email, password: '***' });
-      
       const result = await signIn(email, password);
-      console.log('Sign in result:', result);
-      
       const { error } = result;
 
       if (error) {
-        console.error('Sign in error:', error);
         setError(error.message);
       } else {
-        // Success - wait a moment for auth state to update, then redirect
-        console.log('✅ Sign in successful, redirecting to dashboard...');
-        console.log('Current URL:', window.location.href);
-        setTimeout(() => {
-          console.log('Attempting router.push to /admin/dashboard');
-          console.log('Current pathname:', window.location.pathname);
-          router.push('/admin/dashboard');
-          // Backup: use window.location if router.push fails
-          setTimeout(() => {
-            console.log('After router.push, pathname:', window.location.pathname);
-            if (window.location.pathname !== '/admin/dashboard') {
-              console.log('Router.push failed, using window.location.replace');
-              window.location.replace('/admin/dashboard');
-            }
-          }, 500);
-        }, 100);
+        // Success - redirect to admin dashboard
+        router.push('/admin/dashboard');
       }
     } catch (err) {
-      console.error('Unexpected error:', err);
       setError('An unexpected error occurred.');
     } finally {
       setLoading(false);
@@ -94,12 +57,6 @@ export default function AdminPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {debugInfo && (
-            <div className="p-3 text-sm text-blue-600 bg-blue-50 border border-blue-200 rounded-md dark:bg-blue-900/20 dark:border-blue-800 dark:text-blue-400">
-              Debug: {debugInfo}
-            </div>
-          )}
-          
           {error && (
             <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md dark:bg-red-900/20 dark:border-red-800 dark:text-red-400 flex items-center gap-2">
               <AlertCircle className="h-4 w-4" />
