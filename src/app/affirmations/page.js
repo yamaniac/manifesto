@@ -38,6 +38,9 @@ export default function AffirmationsPage() {
   const [uploadModal, setUploadModal] = useState({ isOpen: false, affirmation: null, file: null, preview: null });
   const [isCompressing, setIsCompressing] = useState(false);
   const [compressionProgress, setCompressionProgress] = useState(0);
+  const [generalImageUploads, setGeneralImageUploads] = useState([]);
+  const [isGeneralUploading, setIsGeneralUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
 
   const supabase = createClient();
 
@@ -104,6 +107,12 @@ export default function AffirmationsPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // For general category, handle image uploads instead of text
+    if (isGeneralCategorySelected()) {
+      await uploadGeneralImages();
+      return;
+    }
     
     if (!formData.text.trim()) {
       alert('Affirmation text is required');
@@ -333,6 +342,7 @@ export default function AffirmationsPage() {
   const resetForm = () => {
     setFormData({ text: '', category_id: 'none' });
     setEditingAffirmation(null);
+    setGeneralImageUploads([]);
   };
 
   const openImageModal = (imageUrl, altText) => {
@@ -512,6 +522,157 @@ export default function AffirmationsPage() {
   const getCharacterCount = () => formData.text.length;
   const isOverLimit = () => getCharacterCount() > 100;
 
+  // Check if general category is selected
+  const isGeneralCategorySelected = () => {
+    const generalCategory = categories.find(cat => cat.name.toLowerCase() === 'general');
+    return generalCategory && formData.category_id === generalCategory.id;
+  };
+
+  // Handle drag and drop for general category
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleMultipleFileSelect(e.dataTransfer.files);
+    }
+  };
+
+  // Handle multiple file selection for general category
+  const handleMultipleFileSelect = async (files) => {
+    const fileArray = Array.from(files);
+    const imageFiles = fileArray.filter(file => file.type.startsWith('image/'));
+    
+    if (imageFiles.length === 0) {
+      showToast('Please select image files only', 'error');
+      return;
+    }
+
+    if (imageFiles.length !== fileArray.length) {
+      showToast(`${fileArray.length - imageFiles.length} non-image files were ignored`, 'info');
+    }
+
+    const newUploads = [];
+    
+    for (const file of imageFiles) {
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+        showToast(`File ${file.name} is too large (max 5MB)`, 'error');
+        continue;
+      }
+
+      try {
+        // Compress the image
+        const compressedFile = await imageCompression(file, {
+          maxSizeMB: 1,
+          maxWidthOrHeight: 1920,
+          useWebWorker: true,
+        });
+
+        // Create preview
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const uploadItem = {
+            id: Date.now() + Math.random(),
+            file: compressedFile,
+            preview: e.target.result,
+            name: file.name,
+            size: compressedFile.size
+          };
+          
+          setGeneralImageUploads(prev => [...prev, uploadItem]);
+        };
+        reader.readAsDataURL(compressedFile);
+      } catch (error) {
+        console.error('Error compressing image:', error);
+        showToast(`Error compressing ${file.name}: ${error.message}`, 'error');
+      }
+    }
+  };
+
+  // Remove uploaded file from general category
+  const removeGeneralUpload = (uploadId) => {
+    setGeneralImageUploads(prev => prev.filter(item => item.id !== uploadId));
+  };
+
+  // Upload all general category images
+  const uploadGeneralImages = async () => {
+    if (generalImageUploads.length === 0) {
+      showToast('Please select images to upload', 'error');
+      return;
+    }
+
+    setIsGeneralUploading(true);
+    let successCount = 0;
+    let errorCount = 0;
+
+    try {
+      for (const uploadItem of generalImageUploads) {
+        try {
+          // Create a unique filename
+          const fileExt = uploadItem.file.name.split('.').pop();
+          const fileName = `general_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+          
+          // Upload to Supabase Storage
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('affirmation-images')
+            .upload(fileName, uploadItem.file, {
+              cacheControl: '3600',
+              upsert: false
+            });
+
+          if (uploadError) throw uploadError;
+
+          // Get public URL
+          const { data: urlData } = supabase.storage
+            .from('affirmation-images')
+            .getPublicUrl(fileName);
+
+          // Create affirmation entry for this image
+          const { error: insertError } = await supabase
+            .from('affirmations')
+            .insert({
+              text: `Image: ${uploadItem.name}`,
+              category_id: formData.category_id,
+              image_url: urlData.publicUrl,
+              image_alt_text: `General category image: ${uploadItem.name}`,
+              is_manual_image: true,
+              created_by: user.id
+            });
+
+          if (insertError) throw insertError;
+          
+          successCount++;
+        } catch (error) {
+          console.error(`Error uploading ${uploadItem.name}:`, error);
+          errorCount++;
+        }
+      }
+
+      // Clear uploads and reload affirmations
+      setGeneralImageUploads([]);
+      await loadAffirmations();
+      
+      showToast(`Upload completed! ✅ ${successCount} successful, ❌ ${errorCount} errors`, 'success');
+      setIsDialogOpen(false);
+    } catch (error) {
+      console.error('Error in general image upload:', error);
+      showToast('Error uploading images: ' + error.message, 'error');
+    } finally {
+      setIsGeneralUploading(false);
+    }
+  };
+
   if (loading || isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -591,72 +752,198 @@ export default function AffirmationsPage() {
                   Add Affirmation
                 </Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className={isGeneralCategorySelected() ? "max-w-4xl" : ""}>
                 <DialogHeader>
                   <DialogTitle>
-                    {editingAffirmation ? 'Edit Affirmation' : 'Create New Affirmation'}
+                    {isGeneralCategorySelected() 
+                      ? 'Upload Images to General Category' 
+                      : editingAffirmation ? 'Edit Affirmation' : 'Create New Affirmation'
+                    }
                   </DialogTitle>
                   <DialogDescription>
-                    {editingAffirmation 
-                      ? 'Update your affirmation below.' 
-                      : 'Add a new positive affirmation (max 100 characters).'
+                    {isGeneralCategorySelected() 
+                      ? 'Drag and drop multiple images or click to select files. Each image will be added as a separate affirmation entry.'
+                      : editingAffirmation 
+                        ? 'Update your affirmation below.' 
+                        : 'Add a new positive affirmation (max 100 characters).'
                     }
                   </DialogDescription>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
-                  <div>
-                    <Label htmlFor="text">Affirmation Text</Label>
-                    <div className="relative">
-                      <Input
-                        id="text"
-                        value={formData.text}
-                        onChange={(e) => setFormData({ ...formData, text: e.target.value })}
-                        placeholder="I am confident and capable..."
-                        required
-                        className={isOverLimit() ? 'border-destructive' : ''}
-                      />
-                      <div className={`text-xs mt-1 ${isOverLimit() ? 'text-destructive' : 'text-muted-foreground'}`}>
-                        {getCharacterCount()}/100 characters
+                  {isGeneralCategorySelected() ? (
+                    // General category image upload interface
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="category">Category</Label>
+                        <Select 
+                          value={formData.category_id} 
+                          onValueChange={(value) => setFormData({ ...formData, category_id: value })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a category" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No Category</SelectItem>
+                            {categories.map((category) => (
+                              <SelectItem key={category.id} value={category.id}>
+                                <div className="flex items-center gap-2">
+                                  <div 
+                                    className="w-3 h-3 rounded"
+                                    style={{ backgroundColor: category.color }}
+                                  />
+                                  {category.name}
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
+                      
+                      {/* Drag and Drop Area */}
+                      <div
+                        className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                          dragActive 
+                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/20' 
+                            : 'border-gray-300 hover:border-gray-400'
+                        }`}
+                        onDragEnter={handleDrag}
+                        onDragLeave={handleDrag}
+                        onDragOver={handleDrag}
+                        onDrop={handleDrop}
+                      >
+                        <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                        <p className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+                          Drop images here or click to select
+                        </p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                          Supports JPG, PNG, WebP, GIF (max 5MB each)
+                        </p>
+                        <Input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={(e) => handleMultipleFileSelect(e.target.files)}
+                          className="hidden"
+                          id="general-image-upload"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => document.getElementById('general-image-upload').click()}
+                        >
+                          <Upload className="mr-2 h-4 w-4" />
+                          Select Images
+                        </Button>
+                      </div>
+
+                      {/* Image Previews */}
+                      {generalImageUploads.length > 0 && (
+                        <div>
+                          <Label>Selected Images ({generalImageUploads.length})</Label>
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mt-2">
+                            {generalImageUploads.map((uploadItem) => (
+                              <div key={uploadItem.id} className="relative group">
+                                <img
+                                  src={uploadItem.preview}
+                                  alt={uploadItem.name}
+                                  className="w-full h-24 object-cover rounded-lg border border-gray-200"
+                                />
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => removeGeneralUpload(uploadItem.id)}
+                                  className="absolute top-1 right-1 p-1 h-6 w-6 bg-red-100 border border-red-200 rounded-full shadow-sm hover:bg-red-200 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  <X className="h-3 w-3 text-red-600" />
+                                </Button>
+                                <div className="absolute bottom-1 left-1 right-1 bg-black bg-opacity-50 text-white text-xs p-1 rounded">
+                                  <p className="truncate">{uploadItem.name}</p>
+                                  <p>{(uploadItem.size / 1024 / 1024).toFixed(2)}MB</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                  <div>
-                    <Label htmlFor="category">Category (Optional)</Label>
-                    <Select 
-                      value={formData.category_id} 
-                      onValueChange={(value) => setFormData({ ...formData, category_id: value })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a category" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No Category</SelectItem>
-                        {categories.map((category) => (
-                          <SelectItem key={category.id} value={category.id}>
-                            <div className="flex items-center gap-2">
-                              <div 
-                                className="w-3 h-3 rounded"
-                                style={{ backgroundColor: category.color }}
-                              />
-                              {category.name}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  ) : (
+                    // Regular affirmation form
+                    <>
+                      <div>
+                        <Label htmlFor="text">Affirmation Text</Label>
+                        <div className="relative">
+                          <Input
+                            id="text"
+                            value={formData.text}
+                            onChange={(e) => setFormData({ ...formData, text: e.target.value })}
+                            placeholder="I am confident and capable..."
+                            required
+                            className={isOverLimit() ? 'border-destructive' : ''}
+                          />
+                          <div className={`text-xs mt-1 ${isOverLimit() ? 'text-destructive' : 'text-muted-foreground'}`}>
+                            {getCharacterCount()}/100 characters
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <Label htmlFor="category">Category (Optional)</Label>
+                        <Select 
+                          value={formData.category_id} 
+                          onValueChange={(value) => setFormData({ ...formData, category_id: value })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a category" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No Category</SelectItem>
+                            {categories.map((category) => (
+                              <SelectItem key={category.id} value={category.id}>
+                                <div className="flex items-center gap-2">
+                                  <div 
+                                    className="w-3 h-3 rounded"
+                                    style={{ backgroundColor: category.color }}
+                                  />
+                                  {category.name}
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </>
+                  )}
+                  
                   <div className="flex gap-2 pt-4">
                     <Button 
                       type="submit" 
                       className="flex-1"
-                      disabled={isOverLimit() || !formData.text.trim()}
+                      disabled={
+                        isGeneralCategorySelected() 
+                          ? generalImageUploads.length === 0 || isGeneralUploading
+                          : isOverLimit() || !formData.text.trim()
+                      }
                     >
-                      {editingAffirmation ? 'Update Affirmation' : 'Create Affirmation'}
+                      {isGeneralCategorySelected() ? (
+                        isGeneralUploading ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            Uploading Images...
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="mr-2 h-4 w-4" />
+                            Upload {generalImageUploads.length} Image{generalImageUploads.length !== 1 ? 's' : ''}
+                          </>
+                        )
+                      ) : (
+                        editingAffirmation ? 'Update Affirmation' : 'Create Affirmation'
+                      )}
                     </Button>
                     <Button 
                       type="button" 
                       variant="outline" 
                       onClick={() => setIsDialogOpen(false)}
+                      disabled={isGeneralUploading}
                     >
                       Cancel
                     </Button>
