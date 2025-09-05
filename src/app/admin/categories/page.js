@@ -1,20 +1,19 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { useRouter } from 'next/navigation';
-import { ArrowLeft, Plus, Edit, Trash2, Tag, Lock } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
+import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ArrowLeft, Plus, Edit, Trash2, Tag, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
+import { useRouter } from "next/navigation";
 
 export default function CategoriesPage() {
-  const { user, isSuperAdmin, loading } = useAuth();
+  const { user, isSuperAdmin, loading, signOut } = useAuth();
   const router = useRouter();
   const [categories, setCategories] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -25,77 +24,87 @@ export default function CategoriesPage() {
     description: '',
     color: '#3B82F6'
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [message, setMessage] = useState({ type: '', text: '' });
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  const supabase = createClient();
-
-  // Load categories on component mount
-  useEffect(() => {
-    loadCategories();
+  // Show message with auto-hide
+  const showMessage = useCallback((type, text) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage({ type: '', text: '' }), 5000);
   }, []);
 
-  const loadCategories = async () => {
+  // Fetch categories
+  const fetchCategories = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('categories')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setCategories(data || []);
+      const response = await fetch('/api/categories');
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to fetch categories');
+      }
+      
+      setCategories(result.data || []);
     } catch (error) {
-      console.error('Error loading categories:', error);
+      console.error('Error fetching categories:', error);
+      showMessage('error', 'Error fetching categories: ' + error.message);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [showMessage]);
 
+  // Load categories on component mount
+  useEffect(() => {
+    if (isSuperAdmin && !loading) {
+      fetchCategories();
+    }
+  }, [isSuperAdmin, loading, fetchCategories]);
+
+  // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!formData.name.trim()) {
-      alert('Category name is required');
-      return;
-    }
+    setIsSubmitting(true);
 
     try {
-      if (editingCategory) {
-        // Update existing category
-        const { error } = await supabase
-          .from('categories')
-          .update({
-            name: formData.name.trim(),
-            description: formData.description.trim() || null,
-            color: formData.color
-          })
-          .eq('id', editingCategory.id);
+      const url = editingCategory 
+        ? `/api/categories/${editingCategory.id}`
+        : '/api/categories';
+      
+      const method = editingCategory ? 'PUT' : 'POST';
+      
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      });
 
-        if (error) throw error;
-      } else {
-        // Create new category
-        const { error } = await supabase
-          .from('categories')
-          .insert({
-            name: formData.name.trim(),
-            description: formData.description.trim() || null,
-            color: formData.color,
-            created_by: user.id
-          });
+      const result = await response.json();
 
-        if (error) throw error;
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to save category');
       }
 
-      // Reset form and reload categories
+      showMessage('success', editingCategory ? 'Category updated successfully!' : 'Category created successfully!');
+      
+      // Reset form and close dialog
       setFormData({ name: '', description: '', color: '#3B82F6' });
       setEditingCategory(null);
       setIsDialogOpen(false);
-      loadCategories();
+      
+      // Refresh categories list
+      fetchCategories();
     } catch (error) {
       console.error('Error saving category:', error);
-      alert('Error saving category: ' + error.message);
+      showMessage('error', 'Error saving category: ' + error.message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
+  // Handle edit category
   const handleEdit = (category) => {
     setEditingCategory(category);
     setFormData({
@@ -106,31 +115,50 @@ export default function CategoriesPage() {
     setIsDialogOpen(true);
   };
 
-  const handleDelete = async (categoryId) => {
-    if (!confirm('Are you sure you want to delete this category? This action cannot be undone.')) {
+  // Handle delete category
+  const handleDelete = async (category) => {
+    if (!confirm(`Are you sure you want to delete the category "${category.name}"? This action cannot be undone.`)) {
       return;
     }
 
+    setIsDeleting(true);
     try {
-      const { error } = await supabase
-        .from('categories')
-        .delete()
-        .eq('id', categoryId);
+      const response = await fetch(`/api/categories/${category.id}`, {
+        method: 'DELETE',
+      });
 
-      if (error) throw error;
-      loadCategories();
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to delete category');
+      }
+
+      showMessage('success', 'Category deleted successfully!');
+      fetchCategories();
     } catch (error) {
       console.error('Error deleting category:', error);
-      alert('Error deleting category: ' + error.message);
+      showMessage('error', 'Error deleting category: ' + error.message);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
-  const resetForm = () => {
-    setFormData({ name: '', description: '', color: '#3B82F6' });
+  // Handle dialog close
+  const handleDialogClose = () => {
+    setIsDialogOpen(false);
     setEditingCategory(null);
+    setFormData({ name: '', description: '', color: '#3B82F6' });
   };
 
-  if (loading || isLoading) {
+  // Handle form input changes
+  const handleInputChange = (field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
@@ -145,14 +173,14 @@ export default function CategoriesPage() {
           <Card className="max-w-md mx-auto">
             <CardContent className="p-6">
               <div className="text-center">
-                <Lock className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                <AlertCircle className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                 <h3 className="text-lg font-semibold mb-2">Access Denied</h3>
                 <p className="text-muted-foreground mb-4">
                   You need super admin privileges to manage categories.
                 </p>
-                <Button onClick={() => router.push('/admin/dashboard')} variant="outline">
+                <Button onClick={() => router.push('/')} variant="outline">
                   <ArrowLeft className="mr-2 h-4 w-4" />
-                  Back to Admin
+                  Back to Home
                 </Button>
               </div>
             </CardContent>
@@ -170,111 +198,160 @@ export default function CategoriesPage() {
           <div>
             <h1 className="text-3xl font-bold flex items-center gap-2">
               <Tag className="h-8 w-8 text-blue-500" />
-              Categories Management
+              Category Management
             </h1>
             <p className="text-muted-foreground mt-1">
-              Create, edit, and manage categories for your application
+              Create, edit, and manage affirmation categories
             </p>
           </div>
-          <div className="flex gap-2">
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-              <DialogTrigger asChild>
-                <Button onClick={resetForm}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Category
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>
-                    {editingCategory ? 'Edit Category' : 'Create New Category'}
-                  </DialogTitle>
-                  <DialogDescription>
-                    {editingCategory 
-                      ? 'Update the category details below.' 
-                      : 'Add a new category to organize your content.'
-                    }
-                  </DialogDescription>
-                </DialogHeader>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div>
-                    <Label htmlFor="name">Category Name</Label>
-                    <Input
-                      id="name"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      placeholder="Enter category name"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="description">Description (Optional)</Label>
-                    <Input
-                      id="description"
-                      value={formData.description}
-                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                      placeholder="Enter category description"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="color">Color</Label>
-                    <div className="flex gap-2 items-center">
-                      <Input
-                        id="color"
-                        type="color"
-                        value={formData.color}
-                        onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                        className="w-20 h-10"
-                      />
-                      <Input
-                        value={formData.color}
-                        onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                        placeholder="#3B82F6"
-                        className="flex-1"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex gap-2 pt-4">
-                    <Button type="submit" className="flex-1">
-                      {editingCategory ? 'Update Category' : 'Create Category'}
-                    </Button>
-                    <Button 
-                      type="button" 
-                      variant="outline" 
-                      onClick={() => setIsDialogOpen(false)}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </form>
-              </DialogContent>
-            </Dialog>
+          <div className="flex gap-3">
             <Button onClick={() => router.push('/admin/dashboard')} variant="outline">
               <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Admin
+              Back to Dashboard
+            </Button>
+            <Button onClick={() => signOut()} variant="destructive">
+              Logout
             </Button>
           </div>
         </div>
 
+        {/* Message Display */}
+        {message.text && (
+          <div className={`p-3 mb-6 rounded-md flex items-center gap-2 ${
+            message.type === 'error' 
+              ? 'text-red-600 bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400'
+              : 'text-green-600 bg-green-50 border border-green-200 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400'
+          }`}>
+            {message.type === 'error' ? (
+              <AlertCircle className="h-4 w-4" />
+            ) : (
+              <CheckCircle className="h-4 w-4" />
+            )}
+            {message.text}
+          </div>
+        )}
+
         {/* Categories Table */}
         <Card>
           <CardHeader>
-            <CardTitle>All Categories ({categories.length})</CardTitle>
-            <CardDescription>
-              Manage and organize your application categories
-            </CardDescription>
+            <div className="flex justify-between items-center">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Tag className="h-5 w-5" />
+                  Categories
+                </CardTitle>
+                <CardDescription>
+                  Manage your affirmation categories. Total: {categories.length}
+                </CardDescription>
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  onClick={fetchCategories} 
+                  variant="outline" 
+                  size="sm"
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                  )}
+                  Refresh
+                </Button>
+                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button onClick={() => handleDialogClose()}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Category
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>
+                        {editingCategory ? 'Edit Category' : 'Create New Category'}
+                      </DialogTitle>
+                      <DialogDescription>
+                        {editingCategory 
+                          ? 'Update the category details below.'
+                          : 'Fill in the details to create a new category.'
+                        }
+                      </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="name">Category Name *</Label>
+                        <Input
+                          id="name"
+                          value={formData.name}
+                          onChange={(e) => handleInputChange('name', e.target.value)}
+                          placeholder="Enter category name"
+                          required
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="description">Description</Label>
+                        <Input
+                          id="description"
+                          value={formData.description}
+                          onChange={(e) => handleInputChange('description', e.target.value)}
+                          placeholder="Enter category description (optional)"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="color">Color</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="color"
+                            type="color"
+                            value={formData.color}
+                            onChange={(e) => handleInputChange('color', e.target.value)}
+                            className="w-16 h-10 p-1"
+                          />
+                          <Input
+                            value={formData.color}
+                            onChange={(e) => handleInputChange('color', e.target.value)}
+                            placeholder="#3B82F6"
+                            className="flex-1"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end space-x-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleDialogClose}
+                          disabled={isSubmitting}
+                        >
+                          Cancel
+                        </Button>
+                        <Button 
+                          type="submit" 
+                          disabled={isSubmitting || !formData.name.trim()}
+                        >
+                          {isSubmitting ? 'Saving...' : (editingCategory ? 'Update' : 'Create')}
+                        </Button>
+                      </div>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            {categories.length === 0 ? (
+            {isLoading ? (
+              <div className="flex items-center justify-center p-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+              </div>
+            ) : categories.length === 0 ? (
               <div className="text-center py-8">
                 <Tag className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No categories yet</h3>
+                <h3 className="text-lg font-semibold mb-2">No Categories</h3>
                 <p className="text-muted-foreground mb-4">
                   Get started by creating your first category.
                 </p>
                 <Button onClick={() => setIsDialogOpen(true)}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Your First Category
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create Category
                 </Button>
               </div>
             ) : (
@@ -285,7 +362,7 @@ export default function CategoriesPage() {
                     <TableHead>Description</TableHead>
                     <TableHead>Color</TableHead>
                     <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -294,52 +371,53 @@ export default function CategoriesPage() {
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2">
                           <div 
-                            className="w-4 h-4 rounded"
+                            className="w-3 h-3 rounded-full" 
                             style={{ backgroundColor: category.color }}
                           />
                           {category.name}
                         </div>
                       </TableCell>
                       <TableCell>
-                        {category.description ? (
-                          <span className="text-muted-foreground">
-                            {category.description}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground italic">
-                            No description
-                          </span>
+                        {category.description || (
+                          <span className="text-muted-foreground italic">No description</span>
                         )}
                       </TableCell>
                       <TableCell>
                         <Badge 
                           variant="outline" 
+                          className="flex items-center gap-1 w-fit"
                           style={{ 
                             backgroundColor: category.color + '20',
                             borderColor: category.color,
                             color: category.color
                           }}
                         >
+                          <div 
+                            className="w-2 h-2 rounded-full" 
+                            style={{ backgroundColor: category.color }}
+                          />
                           {category.color}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell>
                         {new Date(category.created_at).toLocaleDateString()}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex gap-2 justify-end">
+                      <TableCell>
+                        <div className="flex gap-2">
                           <Button
-                            size="sm"
                             variant="outline"
+                            size="sm"
                             onClick={() => handleEdit(category)}
+                            disabled={isSubmitting || isDeleting}
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
                           <Button
-                            size="sm"
                             variant="outline"
-                            onClick={() => handleDelete(category.id)}
-                            className="text-destructive hover:text-destructive"
+                            size="sm"
+                            onClick={() => handleDelete(category)}
+                            disabled={isSubmitting || isDeleting}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>

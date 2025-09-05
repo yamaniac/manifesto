@@ -200,6 +200,15 @@ export default function AdminDashboard() {
                   <MessageSquare className="mr-2 h-4 w-4" />
                   Affirmations
                 </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="w-full justify-start"
+                  onClick={() => router.push('/admin/images')}
+                >
+                  <Image className="mr-2 h-4 w-4" />
+                  Image Management
+                </Button>
               </div>
             </CardContent>
           </Card>

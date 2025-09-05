@@ -1,725 +1,488 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Plus, Edit, Trash2, Heart, MessageSquare, Filter, Star, Image, RefreshCw, Lock, Upload, X } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
-import { useToast } from '@/components/ui/toast';
-import imageCompression from 'browser-image-compression';
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { AlertCircle, CheckCircle, Plus, Search, Upload, Download, Edit, Trash2, Image as ImageIcon, Filter, RefreshCw, ArrowLeft, Lock, MessageSquare, X } from 'lucide-react';
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function AffirmationsPage() {
-  const { user, loading, isSuperAdmin } = useAuth();
+  const { user, isSuperAdmin, signOut } = useAuth();
   const router = useRouter();
-  const { showToast, ToastContainer } = useToast();
   const [affirmations, setAffirmations] = useState([]);
+  const [allAffirmations, setAllAffirmations] = useState([]); // Unfiltered affirmations for counts
   const [categories, setCategories] = useState([]);
-  const [filteredAffirmations, setFilteredAffirmations] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [images, setImages] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState({ type: '', text: '' });
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedAffirmations, setSelectedAffirmations] = useState([]);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isBulkUploadDialogOpen, setIsBulkUploadDialogOpen] = useState(false);
   const [editingAffirmation, setEditingAffirmation] = useState(null);
-  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [bulkUploadData, setBulkUploadData] = useState('');
+  const [createMissingCategories, setCreateMissingCategories] = useState(false);
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const [bulkUploadCategory, setBulkUploadCategory] = useState('');
+  const [isImageSelectDialogOpen, setIsImageSelectDialogOpen] = useState(false);
+  const [selectedAffirmationForImage, setSelectedAffirmationForImage] = useState(null);
+
+  // Form states
   const [formData, setFormData] = useState({
     text: '',
-    category_id: 'none'
+    category_id: '',
+    image_id: ''
   });
-  const [isImageLoading, setIsImageLoading] = useState(false);
-  const [selectedAffirmations, setSelectedAffirmations] = useState(new Set());
-  const [isBulkLoading, setIsBulkLoading] = useState(false);
-  const [imageModal, setImageModal] = useState({ isOpen: false, image: null });
-  const [uploadModal, setUploadModal] = useState({ isOpen: false, affirmation: null, file: null, preview: null });
-  const [isCompressing, setIsCompressing] = useState(false);
-  const [compressionProgress, setCompressionProgress] = useState(0);
-  const [generalImageUploads, setGeneralImageUploads] = useState([]);
-  const [isGeneralUploading, setIsGeneralUploading] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
 
-  const supabase = createClient();
+  // Show message with auto-hide
+  const showMessage = useCallback((type, text) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage({ type: '', text: '' }), 5000);
+  }, []);
 
-  // Load affirmations and categories on component mount
-  useEffect(() => {
-    if (user) {
-      loadAffirmations();
-      loadCategories();
-    }
-  }, [user]);
-
-  // Filter affirmations when category filter changes
-  useEffect(() => {
-    filterAffirmations();
-  }, [affirmations, selectedCategory]);
-
-  const loadAffirmations = async () => {
+  // Fetch affirmations
+  const fetchAffirmations = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('affirmations')
-        .select(`
-          *,
-          categories (
-            id,
-            name,
-            color
-          )
-        `)
-        .order('created_at', { ascending: false });
+      const params = new URLSearchParams();
+      if (searchTerm) params.append('search', searchTerm);
+      if (selectedCategory) params.append('category_id', selectedCategory);
 
-      if (error) throw error;
-      setAffirmations(data || []);
+      const response = await fetch(`/api/affirmations?${params}`);
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to fetch affirmations');
+      }
+      
+      setAffirmations(result.data || []);
     } catch (error) {
-      console.error('Error loading affirmations:', error);
+      console.error('Error fetching affirmations:', error);
+      showMessage('error', 'Error fetching affirmations: ' + error.message);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [searchTerm, selectedCategory, showMessage]);
 
-  const loadCategories = async () => {
+  // Fetch all affirmations (unfiltered) for category counts
+  const fetchAllAffirmations = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('categories')
-        .select('*')
-        .order('name');
-
-      if (error) throw error;
-      setCategories(data || []);
+      const response = await fetch('/api/affirmations');
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to fetch all affirmations');
+      }
+      
+      setAllAffirmations(result.data || []);
     } catch (error) {
-      console.error('Error loading categories:', error);
+      console.error('Error fetching all affirmations:', error);
     }
-  };
+  }, []);
 
-  const filterAffirmations = () => {
-    if (selectedCategory === 'all') {
-      setFilteredAffirmations(affirmations);
-    } else if (selectedCategory === 'uncategorized') {
-      setFilteredAffirmations(affirmations.filter(a => !a.category_id));
-    } else {
-      setFilteredAffirmations(affirmations.filter(a => a.category_id === selectedCategory));
+  // Fetch categories
+  const fetchCategories = useCallback(async () => {
+    try {
+      const response = await fetch('/api/categories');
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to fetch categories');
+      }
+      
+      setCategories(result.data || []);
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+      showMessage('error', 'Error fetching categories: ' + error.message);
     }
-  };
+  }, [showMessage]);
 
+  // Fetch images
+  const fetchImages = useCallback(async (categoryId = '') => {
+    try {
+      const params = new URLSearchParams();
+      if (categoryId) params.append('category_id', categoryId);
+
+      const response = await fetch(`/api/images?${params}`);
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to fetch images');
+      }
+      
+      setImages(result.data || []);
+    } catch (error) {
+      console.error('Error fetching images:', error);
+      showMessage('error', 'Error fetching images: ' + error.message);
+    }
+  }, [showMessage]);
+
+  // Load data on component mount
+  useEffect(() => {
+    if (isSuperAdmin) {
+      fetchAffirmations();
+      fetchAllAffirmations();
+      fetchCategories();
+      fetchImages();
+    }
+  }, [isSuperAdmin, fetchAffirmations, fetchAllAffirmations, fetchCategories, fetchImages]);
+
+  // Refetch when filters change
+  useEffect(() => {
+    if (isSuperAdmin) {
+      fetchAffirmations();
+    }
+  }, [isSuperAdmin, fetchAffirmations]);
+
+  // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    // For general category, handle image uploads instead of text
-    if (isGeneralCategorySelected()) {
-      await uploadGeneralImages();
-      return;
-    }
-    
-    if (!formData.text.trim()) {
-      alert('Affirmation text is required');
-      return;
-    }
-
-    if (formData.text.length > 100) {
-      alert('Affirmation text must be 100 characters or less');
+    if (!formData.text.trim() || !formData.category_id) {
+      showMessage('error', 'Please fill in all required fields');
       return;
     }
 
     try {
-      if (editingAffirmation) {
-        // Update existing affirmation
-        const { error } = await supabase
-          .from('affirmations')
-          .update({
-            text: formData.text.trim(),
-            category_id: formData.category_id === 'none' ? null : formData.category_id || null
-          })
-          .eq('id', editingAffirmation.id);
+      const url = editingAffirmation ? `/api/affirmations/${editingAffirmation.id}` : '/api/affirmations';
+      const method = editingAffirmation ? 'PUT' : 'POST';
+      
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
 
-        if (error) throw error;
-      } else {
-        // Create new affirmation
-        const { error } = await supabase
-          .from('affirmations')
-          .insert({
-            text: formData.text.trim(),
-            category_id: formData.category_id === 'none' ? null : formData.category_id || null,
-            created_by: user.id
-          });
+      const result = await response.json();
 
-        if (error) throw error;
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to save affirmation');
       }
 
-      // Reset form and reload affirmations
-      setFormData({ text: '', category_id: 'none' });
+      showMessage('success', `Affirmation ${editingAffirmation ? 'updated' : 'created'} successfully`);
+      setIsCreateDialogOpen(false);
+      setIsEditDialogOpen(false);
       setEditingAffirmation(null);
-      setIsDialogOpen(false);
-      loadAffirmations();
+      setFormData({ text: '', category_id: '', image_id: '' });
+      fetchAffirmations();
+      fetchAllAffirmations();
     } catch (error) {
       console.error('Error saving affirmation:', error);
-      alert('Error saving affirmation: ' + error.message);
+      showMessage('error', 'Error saving affirmation: ' + error.message);
     }
   };
 
+  // Handle edit
   const handleEdit = (affirmation) => {
     setEditingAffirmation(affirmation);
     setFormData({
       text: affirmation.text,
-      category_id: affirmation.category_id || 'none'
+      category_id: affirmation.category_id,
+      image_id: affirmation.image_id || ''
     });
-    setIsDialogOpen(true);
+    setIsEditDialogOpen(true);
   };
 
+  // Handle delete
   const handleDelete = async (affirmationId) => {
-    if (!confirm('Are you sure you want to delete this affirmation? This action cannot be undone.')) {
-      return;
-    }
+    if (!confirm('Are you sure you want to delete this affirmation?')) return;
 
     try {
-      const { error } = await supabase
-        .from('affirmations')
-        .delete()
-        .eq('id', affirmationId);
-
-      if (error) throw error;
-      loadAffirmations();
-    } catch (error) {
-      console.error('Error deleting affirmation:', error);
-      alert('Error deleting affirmation: ' + error.message);
-    }
-  };
-
-  const toggleFavorite = async (affirmation) => {
-    try {
-      const { error } = await supabase
-        .from('affirmations')
-        .update({ is_favorite: !affirmation.is_favorite })
-        .eq('id', affirmation.id);
-
-      if (error) throw error;
-      // Update local state instead of reloading everything
-      updateAffirmationInState(affirmation.id, { is_favorite: !affirmation.is_favorite });
-    } catch (error) {
-      console.error('Error updating favorite:', error);
-    }
-  };
-
-  const fetchAndStoreImage = async (affirmation) => {
-    if (!affirmation.categories?.name) {
-      showToast('Please select a category for this affirmation to fetch an image', 'info');
-      return;
-    }
-
-    setIsImageLoading(true);
-    try {
-      const response = await fetch('/api/affirmations/images', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          affirmationId: affirmation.id,
-          categoryName: affirmation.categories.name,
-          affirmationText: affirmation.text
-        }),
+      const response = await fetch(`/api/affirmations/${affirmationId}`, {
+        method: 'DELETE'
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to fetch image');
-      }
 
       const result = await response.json();
-      
-      if (result.success) {
-        // Update the affirmation in local state with the new image
-        updateAffirmationInState(affirmation.id, {
-          image_url: result.image.url,
-          image_alt_text: result.image.alt_text
-        });
-        showToast('Image successfully added!', 'success');
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to delete affirmation');
       }
+
+      showMessage('success', 'Affirmation deleted successfully');
+      fetchAffirmations();
+      fetchAllAffirmations();
     } catch (error) {
-      console.error('Error fetching image:', error);
-      showToast('Error fetching image: ' + error.message, 'error');
+      console.error('Error deleting affirmation:', error);
+      showMessage('error', 'Error deleting affirmation: ' + error.message);
+    }
+  };
+
+  // Handle bulk delete
+  const handleBulkDelete = async () => {
+    if (selectedAffirmations.length === 0) {
+      showMessage('error', 'Please select affirmations to delete');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to delete ${selectedAffirmations.length} affirmation(s)?`)) return;
+
+    try {
+      const response = await fetch('/api/affirmations', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ affirmationIds: selectedAffirmations })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to delete affirmations');
+      }
+
+      showMessage('success', `Successfully deleted ${selectedAffirmations.length} affirmation(s)`);
+      setSelectedAffirmations([]);
+      fetchAffirmations();
+      fetchAllAffirmations();
+    } catch (error) {
+      console.error('Error deleting affirmations:', error);
+      showMessage('error', 'Error deleting affirmations: ' + error.message);
+    }
+  };
+
+  // Handle file upload
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (file.type !== 'application/json' && !file.name.endsWith('.json')) {
+      showMessage('error', 'Please select a JSON file');
+      return;
+    }
+
+    setIsProcessingFile(true);
+    try {
+      const text = await file.text();
+      const affirmations = JSON.parse(text);
+      
+      if (!Array.isArray(affirmations)) {
+        throw new Error('JSON file must contain an array of affirmations');
+      }
+
+      setBulkUploadData(JSON.stringify(affirmations, null, 2));
+      setUploadedFile(file);
+      setBulkUploadCategory(''); // Reset category selection when new file is loaded
+      showMessage('success', `File "${file.name}" loaded successfully`);
+    } catch (error) {
+      console.error('Error processing file:', error);
+      showMessage('error', 'Error processing file: ' + error.message);
     } finally {
-      setIsImageLoading(false);
+      setIsProcessingFile(false);
     }
   };
 
-  const toggleAffirmationSelection = (affirmationId) => {
-    const newSelected = new Set(selectedAffirmations);
-    if (newSelected.has(affirmationId)) {
-      newSelected.delete(affirmationId);
-    } else {
-      newSelected.add(affirmationId);
+  // Handle bulk upload
+  const handleBulkUpload = async () => {
+    if (!bulkUploadData.trim()) {
+      showMessage('error', 'Please enter JSON data or upload a file');
+      return;
     }
-    setSelectedAffirmations(newSelected);
+
+    if (!bulkUploadCategory) {
+      showMessage('error', 'Please select a target category for the upload');
+      return;
+    }
+
+    try {
+      let affirmations;
+      try {
+        affirmations = JSON.parse(bulkUploadData);
+      } catch (parseError) {
+        throw new Error('Invalid JSON format: ' + parseError.message);
+      }
+      
+      // If not creating missing categories, map all affirmations to the selected category
+      if (!createMissingCategories) {
+        affirmations = affirmations.map(affirmation => ({
+          ...affirmation,
+          category: categories.find(c => c.id === bulkUploadCategory)?.name || affirmation.category
+        }));
+      }
+      
+      console.log('Uploading affirmations:', affirmations);
+      console.log('Create missing categories:', createMissingCategories);
+      console.log('Target category:', bulkUploadCategory);
+      
+      const response = await fetch('/api/affirmations/bulk-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          affirmations, 
+          createMissingCategories 
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        if (result.details && Array.isArray(result.details)) {
+          const errorDetails = result.details.join('\n');
+          throw new Error(`${result.error}\n\nDetails:\n${errorDetails}`);
+        }
+        throw new Error(result.error || 'Failed to upload affirmations');
+      }
+
+      showMessage('success', `Successfully uploaded ${result.stats.inserted} affirmations`);
+      setBulkUploadData('');
+      setUploadedFile(null);
+      setBulkUploadCategory('');
+      setIsBulkUploadDialogOpen(false);
+      fetchAffirmations();
+      fetchAllAffirmations();
+    } catch (error) {
+      console.error('Error uploading affirmations:', error);
+      showMessage('error', 'Error uploading affirmations: ' + error.message);
+    }
   };
 
-  const selectAllAffirmations = () => {
-    const allIds = filteredAffirmations.map(a => a.id);
-    setSelectedAffirmations(new Set(allIds));
+  // Handle export
+  const handleExport = async (format = 'json') => {
+    try {
+      const params = new URLSearchParams();
+      if (selectedCategory) params.append('category_id', selectedCategory);
+      params.append('format', format);
+
+      const response = await fetch(`/api/affirmations/export?${params}`);
+      
+      if (!response.ok) {
+        const result = await response.json();
+        throw new Error(result.error || 'Failed to export affirmations');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `affirmations.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      showMessage('success', 'Affirmations exported successfully');
+    } catch (error) {
+      console.error('Error exporting affirmations:', error);
+      showMessage('error', 'Error exporting affirmations: ' + error.message);
+    }
   };
 
+  // Handle category change for image filtering
+  const handleCategoryChange = (categoryId) => {
+    setFormData(prev => ({ ...prev, category_id: categoryId, image_id: '' }));
+    fetchImages(categoryId);
+  };
+
+  // Toggle selection
+  const toggleSelection = (affirmationId) => {
+    setSelectedAffirmations(prev => 
+      prev.includes(affirmationId) 
+        ? prev.filter(id => id !== affirmationId)
+        : [...prev, affirmationId]
+    );
+  };
+
+  // Select all
+  const selectAll = () => {
+    setSelectedAffirmations(affirmations.map(a => a.id));
+  };
+
+  // Clear selection
   const clearSelection = () => {
-    setSelectedAffirmations(new Set());
+    setSelectedAffirmations([]);
   };
 
-  const updateAffirmationInState = (affirmationId, updates) => {
-    setAffirmations(prev => prev.map(aff => 
-      aff.id === affirmationId ? { ...aff, ...updates } : aff
-    ));
+  // Handle image selection for affirmation
+  const handleImageSelect = (affirmation) => {
+    setSelectedAffirmationForImage(affirmation);
+    fetchImages(affirmation.category_id);
+    setIsImageSelectDialogOpen(true);
   };
 
-  const bulkFetchImages = async () => {
-    if (selectedAffirmations.size === 0) {
-      showToast('Please select affirmations to fetch images for', 'info');
-      return;
-    }
-
-    const selectedAffirmationsList = filteredAffirmations.filter(a => selectedAffirmations.has(a.id));
-    const affirmationsWithCategories = selectedAffirmationsList.filter(a => a.categories?.name);
-    const affirmationsWithoutCategories = selectedAffirmationsList.filter(a => !a.categories?.name);
-
-    if (affirmationsWithoutCategories.length > 0) {
-      const names = affirmationsWithoutCategories.map(a => a.text.substring(0, 30) + '...').join(', ');
-      showToast(`${affirmationsWithoutCategories.length} affirmations don't have categories and will be skipped: ${names}`, 'info');
-    }
-
-    if (affirmationsWithCategories.length === 0) {
-      showToast('No selected affirmations have categories assigned', 'info');
-      return;
-    }
-
-    setIsBulkLoading(true);
-    showToast(`Starting bulk image fetch for ${affirmationsWithCategories.length} affirmations...`, 'info');
-    let successCount = 0;
-    let errorCount = 0;
+  // Assign image to affirmation
+  const assignImageToAffirmation = async (imageId) => {
+    if (!selectedAffirmationForImage) return;
 
     try {
-      for (const affirmation of affirmationsWithCategories) {
-        try {
-          const response = await fetch('/api/affirmations/images', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              affirmationId: affirmation.id,
-              categoryName: affirmation.categories.name,
-              affirmationText: affirmation.text
-            }),
-          });
-
-          if (response.ok) {
-            successCount++;
-          } else {
-            errorCount++;
-            console.error(`Failed to fetch image for affirmation ${affirmation.id}`);
-          }
-        } catch (error) {
-          errorCount++;
-          console.error(`Error fetching image for affirmation ${affirmation.id}:`, error);
-        }
-      }
-
-      // Reload affirmations to show all new images
-      await loadAffirmations();
-      
-      // Clear selection after bulk operation
-      setSelectedAffirmations(new Set());
-      
-      // Show success toast
-      showToast(`Bulk image fetch completed! ✅ ${successCount} successful, ❌ ${errorCount} errors`, 'success');
-    } catch (error) {
-      console.error('Error in bulk image fetch:', error);
-      showToast('Error in bulk image fetch: ' + error.message, 'error');
-    } finally {
-      setIsBulkLoading(false);
-    }
-  };
-
-  const resetForm = () => {
-    setFormData({ text: '', category_id: 'none' });
-    setEditingAffirmation(null);
-    setGeneralImageUploads([]);
-  };
-
-  const openImageModal = (imageUrl, altText) => {
-    setImageModal({
-      isOpen: true,
-      image: { url: imageUrl, alt: altText }
-    });
-  };
-
-  const closeImageModal = () => {
-    setImageModal({ isOpen: false, image: null });
-  };
-
-  const openUploadModal = (affirmation) => {
-    setUploadModal({
-      isOpen: true,
-      affirmation: affirmation,
-      file: null,
-      preview: null
-    });
-  };
-
-  const closeUploadModal = () => {
-    setUploadModal({
-      isOpen: false,
-      affirmation: null,
-      file: null,
-      preview: null
-    });
-    setIsCompressing(false);
-    setCompressionProgress(0);
-  };
-
-  const handleFileSelect = async (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) { // 5MB limit
-        showToast('File size must be less than 5MB', 'error');
-        return;
-      }
-      
-      if (!file.type.startsWith('image/')) {
-        showToast('Please select an image file', 'error');
-        return;
-      }
-
-      setIsCompressing(true);
-      setCompressionProgress(0);
-
-      try {
-        // Compress the image
-        const compressedFile = await imageCompression(file, {
-          maxSizeMB: 1, // Maximum file size in MB
-          maxWidthOrHeight: 1920, // Maximum width or height
-          useWebWorker: true,
-          onProgress: (progress) => {
-            setCompressionProgress(Math.round(progress));
-          }
-        });
-
-        // Create preview from compressed file
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          setUploadModal(prev => ({
-            ...prev,
-            file: compressedFile,
-            preview: e.target.result
-          }));
-          setIsCompressing(false);
-          setCompressionProgress(0);
-          
-          // Show compression info
-          const originalSize = (file.size / 1024 / 1024).toFixed(2);
-          const compressedSize = (compressedFile.size / 1024 / 1024).toFixed(2);
-          const savings = ((1 - compressedFile.size / file.size) * 100).toFixed(1);
-          showToast(`Image compressed: ${originalSize}MB → ${compressedSize}MB (${savings}% smaller)`, 'success');
-        };
-        reader.readAsDataURL(compressedFile);
-      } catch (error) {
-        console.error('Error compressing image:', error);
-        showToast('Error compressing image: ' + error.message, 'error');
-        setIsCompressing(false);
-        setCompressionProgress(0);
-      }
-    }
-  };
-
-  const uploadManualImage = async () => {
-    if (!uploadModal.file || !uploadModal.affirmation) {
-      showToast('Please select an image file', 'error');
-      return;
-    }
-
-    try {
-      // Create a unique filename
-      const fileExt = uploadModal.file.name.split('.').pop();
-      const fileName = `manual_${uploadModal.affirmation.id}_${Date.now()}.${fileExt}`;
-      
-      // Upload to Supabase Storage directly with the file
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('affirmation-images')
-        .upload(fileName, uploadModal.file, {
-          cacheControl: '3600',
-          upsert: false
-        });
-
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('affirmation-images')
-        .getPublicUrl(fileName);
-
-      // Update affirmation with manual image
-      const { error: updateError } = await supabase
-        .from('affirmations')
-        .update({
-          image_url: urlData.publicUrl,
-          image_alt_text: `Manual upload: ${uploadModal.affirmation.text}`,
-          is_manual_image: true
+      const response = await fetch(`/api/affirmations/${selectedAffirmationForImage.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: selectedAffirmationForImage.text,
+          category_id: selectedAffirmationForImage.category_id,
+          image_id: imageId
         })
-        .eq('id', uploadModal.affirmation.id);
-
-      if (updateError) throw updateError;
-
-      // Update local state
-      updateAffirmationInState(uploadModal.affirmation.id, {
-        image_url: urlData.publicUrl,
-        image_alt_text: `Manual upload: ${uploadModal.affirmation.text}`,
-        is_manual_image: true
       });
 
-      showToast('Image uploaded successfully!', 'success');
-      closeUploadModal();
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to assign image');
+      }
+
+      showMessage('success', 'Image assigned successfully');
+      setIsImageSelectDialogOpen(false);
+      setSelectedAffirmationForImage(null);
+      fetchAffirmations();
     } catch (error) {
-      console.error('Error uploading image:', error);
-      showToast('Error uploading image: ' + error.message, 'error');
+      console.error('Error assigning image:', error);
+      showMessage('error', 'Error assigning image: ' + error.message);
     }
   };
 
-  const deleteManualImage = async (affirmation) => {
-    if (!confirm('Are you sure you want to delete this manually uploaded image? This action cannot be undone.')) {
-      return;
-    }
+  // Remove image from affirmation
+  const removeImageFromAffirmation = async (affirmation) => {
+    if (!affirmation) return;
 
     try {
-      // Update affirmation to remove image
-      const { error: updateError } = await supabase
-        .from('affirmations')
-        .update({
-          image_url: null,
-          image_alt_text: null,
-          is_manual_image: false
+      const response = await fetch(`/api/affirmations/${affirmation.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: affirmation.text,
+          category_id: affirmation.category_id,
+          image_id: null
         })
-        .eq('id', affirmation.id);
-
-      if (updateError) throw updateError;
-
-      // Update local state
-      updateAffirmationInState(affirmation.id, {
-        image_url: null,
-        image_alt_text: null,
-        is_manual_image: false
       });
 
-      showToast('Image deleted successfully!', 'success');
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to remove image');
+      }
+
+      showMessage('success', 'Image removed successfully');
+      fetchAffirmations();
+      fetchAllAffirmations();
     } catch (error) {
-      console.error('Error deleting image:', error);
-      showToast('Error deleting image: ' + error.message, 'error');
+      console.error('Error removing image:', error);
+      showMessage('error', 'Error removing image: ' + error.message);
     }
   };
 
-  const isManualImage = (affirmation) => {
-    return affirmation.is_manual_image === true;
-  };
-
-  const getCharacterCount = () => formData.text.length;
-  const isOverLimit = () => getCharacterCount() > 100;
-
-  // Check if general category is selected
-  const isGeneralCategorySelected = () => {
-    const generalCategory = categories.find(cat => cat.name.toLowerCase() === 'general');
-    return generalCategory && formData.category_id === generalCategory.id;
-  };
-
-  // Handle drag and drop for general category
-  const handleDrag = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
-  };
-
-  const handleDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleMultipleFileSelect(e.dataTransfer.files);
-    }
-  };
-
-  // Handle multiple file selection for general category
-  const handleMultipleFileSelect = async (files) => {
-    const fileArray = Array.from(files);
-    const imageFiles = fileArray.filter(file => file.type.startsWith('image/'));
-    
-    if (imageFiles.length === 0) {
-      showToast('Please select image files only', 'error');
-      return;
-    }
-
-    if (imageFiles.length !== fileArray.length) {
-      showToast(`${fileArray.length - imageFiles.length} non-image files were ignored`, 'info');
-    }
-
-    const newUploads = [];
-    
-    for (const file of imageFiles) {
-      if (file.size > 5 * 1024 * 1024) { // 5MB limit
-        showToast(`File ${file.name} is too large (max 5MB)`, 'error');
-        continue;
-      }
-
-      try {
-        // Compress the image
-        const compressedFile = await imageCompression(file, {
-          maxSizeMB: 1,
-          maxWidthOrHeight: 1920,
-          useWebWorker: true,
-        });
-
-        // Create preview
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const uploadItem = {
-            id: Date.now() + Math.random(),
-            file: compressedFile,
-            preview: e.target.result,
-            name: file.name,
-            size: compressedFile.size
-          };
-          
-          setGeneralImageUploads(prev => [...prev, uploadItem]);
-        };
-        reader.readAsDataURL(compressedFile);
-      } catch (error) {
-        console.error('Error compressing image:', error);
-        showToast(`Error compressing ${file.name}: ${error.message}`, 'error');
-      }
-    }
-  };
-
-  // Remove uploaded file from general category
-  const removeGeneralUpload = (uploadId) => {
-    setGeneralImageUploads(prev => prev.filter(item => item.id !== uploadId));
-  };
-
-  // Upload all general category images
-  const uploadGeneralImages = async () => {
-    if (generalImageUploads.length === 0) {
-      showToast('Please select images to upload', 'error');
-      return;
-    }
-
-    setIsGeneralUploading(true);
-    let successCount = 0;
-    let errorCount = 0;
-
-    try {
-      for (const uploadItem of generalImageUploads) {
-        try {
-          // Create a unique filename
-          const fileExt = uploadItem.file.name.split('.').pop();
-          const fileName = `general_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
-          
-          // Upload to Supabase Storage
-          const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('affirmation-images')
-            .upload(fileName, uploadItem.file, {
-              cacheControl: '3600',
-              upsert: false
-            });
-
-          if (uploadError) throw uploadError;
-
-          // Get public URL
-          const { data: urlData } = supabase.storage
-            .from('affirmation-images')
-            .getPublicUrl(fileName);
-
-          // Create affirmation entry for this image
-          const { error: insertError } = await supabase
-            .from('affirmations')
-            .insert({
-              text: `Image: ${uploadItem.name}`,
-              category_id: formData.category_id,
-              image_url: urlData.publicUrl,
-              image_alt_text: `General category image: ${uploadItem.name}`,
-              is_manual_image: true,
-              created_by: user.id
-            });
-
-          if (insertError) throw insertError;
-          
-          successCount++;
-        } catch (error) {
-          console.error(`Error uploading ${uploadItem.name}:`, error);
-          errorCount++;
-        }
-      }
-
-      // Clear uploads and reload affirmations
-      setGeneralImageUploads([]);
-      await loadAffirmations();
-      
-      showToast(`Upload completed! ✅ ${successCount} successful, ❌ ${errorCount} errors`, 'success');
-      setIsDialogOpen(false);
-    } catch (error) {
-      console.error('Error in general image upload:', error);
-      showToast('Error uploading images: ' + error.message, 'error');
-    } finally {
-      setIsGeneralUploading(false);
-    }
-  };
-
-  if (loading || isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
-
-  if (!user) {
+  if (!user || !isSuperAdmin) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
         <div className="container mx-auto p-8">
           <Card className="max-w-md mx-auto">
             <CardContent className="p-6">
               <div className="text-center">
-                <MessageSquare className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">Authentication Required</h3>
-                <p className="text-muted-foreground mb-4">
-                  Please log in to manage your affirmations.
-                </p>
-                <Button onClick={() => router.push('/login')}>
-                  Sign In
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
-  }
-
-  // Check if user has super admin access
-  if (!isSuperAdmin) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
-        <div className="container mx-auto p-8">
-          <Card className="max-w-md mx-auto">
-            <CardContent className="p-6">
-              <div className="text-center">
-                <Lock className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">Access Denied</h3>
+                <AlertCircle className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-2">Access Required</h3>
                 <p className="text-muted-foreground mb-4">
                   You need super admin privileges to manage affirmations.
                 </p>
-                <Button onClick={() => router.push('/admin/dashboard')} variant="outline">
+                <Button onClick={() => router.push('/')} variant="outline">
                   <ArrowLeft className="mr-2 h-4 w-4" />
-                  Back to Admin
+                  Back to Home
                 </Button>
               </div>
             </CardContent>
@@ -736,248 +499,625 @@ export default function AffirmationsPage() {
         <div className="flex justify-between items-center mb-8">
           <div>
             <h1 className="text-3xl font-bold flex items-center gap-2">
-              <MessageSquare className="h-8 w-8 text-purple-500" />
+              <MessageSquare className="h-8 w-8 text-blue-500" />
               Affirmations Management
             </h1>
             <p className="text-muted-foreground mt-1">
-              Super Admin: Create and organize system affirmations
+              Manage your affirmations, categories, and images
             </p>
-
           </div>
-          <div className="flex gap-2">
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-              <DialogTrigger asChild>
-                <Button onClick={resetForm}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Affirmation
-                </Button>
-              </DialogTrigger>
-              <DialogContent className={isGeneralCategorySelected() ? "max-w-4xl" : ""}>
-                <DialogHeader>
-                  <DialogTitle>
-                    {isGeneralCategorySelected() 
-                      ? 'Upload Images to General Category' 
-                      : editingAffirmation ? 'Edit Affirmation' : 'Create New Affirmation'
-                    }
-                  </DialogTitle>
-                  <DialogDescription>
-                    {isGeneralCategorySelected() 
-                      ? 'Drag and drop multiple images or click to select files. Each image will be added as a separate affirmation entry.'
-                      : editingAffirmation 
-                        ? 'Update your affirmation below.' 
-                        : 'Add a new positive affirmation (max 100 characters).'
-                    }
-                  </DialogDescription>
-                </DialogHeader>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  {isGeneralCategorySelected() ? (
-                    // General category image upload interface
-                    <div className="space-y-4">
-                      <div>
-                        <Label htmlFor="category">Category</Label>
-                        <Select 
-                          value={formData.category_id} 
-                          onValueChange={(value) => setFormData({ ...formData, category_id: value })}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a category" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">No Category</SelectItem>
-                            {categories.map((category) => (
-                              <SelectItem key={category.id} value={category.id}>
-                                <div className="flex items-center gap-2">
-                                  <div 
-                                    className="w-3 h-3 rounded"
-                                    style={{ backgroundColor: category.color }}
-                                  />
-                                  {category.name}
-                                </div>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      
-                      {/* Drag and Drop Area */}
-                      <div
-                        className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-                          dragActive 
-                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/20' 
-                            : 'border-gray-300 hover:border-gray-400'
-                        }`}
-                        onDragEnter={handleDrag}
-                        onDragLeave={handleDrag}
-                        onDragOver={handleDrag}
-                        onDrop={handleDrop}
-                      >
-                        <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                        <p className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-                          Drop images here or click to select
-                        </p>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                          Supports JPG, PNG, WebP, GIF (max 5MB each)
-                        </p>
-                        <Input
-                          type="file"
-                          accept="image/*"
-                          multiple
-                          onChange={(e) => handleMultipleFileSelect(e.target.files)}
-                          className="hidden"
-                          id="general-image-upload"
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => document.getElementById('general-image-upload').click()}
-                        >
-                          <Upload className="mr-2 h-4 w-4" />
-                          Select Images
-                        </Button>
-                      </div>
-
-                      {/* Image Previews */}
-                      {generalImageUploads.length > 0 && (
-                        <div>
-                          <Label>Selected Images ({generalImageUploads.length})</Label>
-                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mt-2">
-                            {generalImageUploads.map((uploadItem) => (
-                              <div key={uploadItem.id} className="relative group">
-                                <img
-                                  src={uploadItem.preview}
-                                  alt={uploadItem.name}
-                                  className="w-full h-24 object-cover rounded-lg border border-gray-200"
-                                />
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => removeGeneralUpload(uploadItem.id)}
-                                  className="absolute top-1 right-1 p-1 h-6 w-6 bg-red-100 border border-red-200 rounded-full shadow-sm hover:bg-red-200 opacity-0 group-hover:opacity-100 transition-opacity"
-                                >
-                                  <X className="h-3 w-3 text-red-600" />
-                                </Button>
-                                <div className="absolute bottom-1 left-1 right-1 bg-black bg-opacity-50 text-white text-xs p-1 rounded">
-                                  <p className="truncate">{uploadItem.name}</p>
-                                  <p>{(uploadItem.size / 1024 / 1024).toFixed(2)}MB</p>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    // Regular affirmation form
-                    <>
-                      <div>
-                        <Label htmlFor="text">Affirmation Text</Label>
-                        <div className="relative">
-                          <Input
-                            id="text"
-                            value={formData.text}
-                            onChange={(e) => setFormData({ ...formData, text: e.target.value })}
-                            placeholder="I am confident and capable..."
-                            required
-                            className={isOverLimit() ? 'border-destructive' : ''}
-                          />
-                          <div className={`text-xs mt-1 ${isOverLimit() ? 'text-destructive' : 'text-muted-foreground'}`}>
-                            {getCharacterCount()}/100 characters
-                          </div>
-                        </div>
-                      </div>
-                      <div>
-                        <Label htmlFor="category">Category (Optional)</Label>
-                        <Select 
-                          value={formData.category_id} 
-                          onValueChange={(value) => setFormData({ ...formData, category_id: value })}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a category" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">No Category</SelectItem>
-                            {categories.map((category) => (
-                              <SelectItem key={category.id} value={category.id}>
-                                <div className="flex items-center gap-2">
-                                  <div 
-                                    className="w-3 h-3 rounded"
-                                    style={{ backgroundColor: category.color }}
-                                  />
-                                  {category.name}
-                                </div>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </>
-                  )}
-                  
-                  <div className="flex gap-2 pt-4">
-                    <Button 
-                      type="submit" 
-                      className="flex-1"
-                      disabled={
-                        isGeneralCategorySelected() 
-                          ? generalImageUploads.length === 0 || isGeneralUploading
-                          : isOverLimit() || !formData.text.trim()
-                      }
-                    >
-                      {isGeneralCategorySelected() ? (
-                        isGeneralUploading ? (
-                          <>
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                            Uploading Images...
-                          </>
-                        ) : (
-                          <>
-                            <Upload className="mr-2 h-4 w-4" />
-                            Upload {generalImageUploads.length} Image{generalImageUploads.length !== 1 ? 's' : ''}
-                          </>
-                        )
-                      ) : (
-                        editingAffirmation ? 'Update Affirmation' : 'Create Affirmation'
-                      )}
-                    </Button>
-                    <Button 
-                      type="button" 
-                      variant="outline" 
-                      onClick={() => setIsDialogOpen(false)}
-                      disabled={isGeneralUploading}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </form>
-              </DialogContent>
-            </Dialog>
+          <div className="flex gap-3">
             <Button onClick={() => router.push('/admin/dashboard')} variant="outline">
               <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Admin
+              Admin Dashboard
+            </Button>
+            <Button onClick={() => signOut()} variant="destructive">
+              <Lock className="mr-2 h-4 w-4" />
+              Logout
             </Button>
           </div>
         </div>
 
-        {/* Filter Bar */}
-        <Card className="mb-6">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Filter className="h-4 w-4 text-muted-foreground" />
-                <Label className="text-sm font-medium">Filter by Category:</Label>
+        {/* Action Buttons */}
+        <div className="flex gap-2 mb-6">
+          <Button
+            variant="outline"
+            onClick={() => handleExport('json')}
+            disabled={isLoading}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Export JSON
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => handleExport('csv')}
+            disabled={isLoading}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Export CSV
+          </Button>
+          <Dialog open={isBulkUploadDialogOpen} onOpenChange={setIsBulkUploadDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Upload className="h-4 w-4 mr-2" />
+                Bulk Upload
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Bulk Upload Affirmations</DialogTitle>
+                <DialogDescription>
+                  Upload multiple affirmations from JSON format. Each affirmation should have 'text' and 'category' fields.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-6">
+                {/* File Upload Section */}
+                <div>
+                  <Label className="text-base font-medium">Upload JSON File</Label>
+                  <div className="mt-2">
+                    <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center hover:border-gray-400 dark:hover:border-gray-500 transition-colors">
+                      <input
+                        type="file"
+                        accept=".json,application/json"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                        id="file-upload"
+                        disabled={isProcessingFile}
+                      />
+                      <label htmlFor="file-upload" className="cursor-pointer">
+                        <Upload className="mx-auto h-8 w-8 text-gray-400 mb-2" />
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                          {isProcessingFile ? 'Processing file...' : 'Click to upload JSON file or drag and drop'}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Supports .json files
+                        </p>
+                      </label>
+                    </div>
+                    {uploadedFile && (
+                      <div className="mt-2 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle className="h-4 w-4 text-green-600" />
+                          <span className="text-sm text-green-800 dark:text-green-200">
+                            File loaded: {uploadedFile.name}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setUploadedFile(null);
+                              setBulkUploadData('');
+                            }}
+                            className="ml-auto h-6 w-6 p-0"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Divider */}
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-background px-2 text-muted-foreground">Or</span>
+                  </div>
+                </div>
+
+                {/* Manual JSON Input */}
+                <div>
+                  <Label htmlFor="bulkData">Paste JSON Data</Label>
+                  <textarea
+                    id="bulkData"
+                    value={bulkUploadData}
+                    onChange={(e) => setBulkUploadData(e.target.value)}
+                    placeholder='[{"text": "I am worthy of success", "category": "Motivation"}, ...]'
+                    className="w-full h-40 p-3 border rounded-md font-mono text-sm mt-2"
+                  />
+                </div>
+
+                {/* Category Selection */}
+                <div>
+                  <Label htmlFor="bulkCategory">Target Category *</Label>
+                  <Select
+                    value={bulkUploadCategory}
+                    onValueChange={setBulkUploadCategory}
+                    required
+                  >
+                    <SelectTrigger className="mt-2">
+                      <SelectValue placeholder="Select target category for upload" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.map(category => (
+                        <SelectItem key={category.id} value={category.id}>
+                          <div className="flex items-center gap-2">
+                            <div 
+                              className="w-3 h-3 rounded-full" 
+                              style={{ backgroundColor: category.color }}
+                            />
+                            {category.name}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    All affirmations will be assigned to this category
+                  </p>
+                </div>
+
+                {/* Options */}
+                <div className="space-y-3">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="createMissing"
+                      checked={createMissingCategories}
+                      onChange={(e) => setCreateMissingCategories(e.target.checked)}
+                    />
+                    <Label htmlFor="createMissing">Create missing categories automatically</Label>
+                  </div>
+                  {createMissingCategories && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      ⚠️ This will create new categories if they don't exist. Otherwise, all affirmations will be assigned to the selected category above.
+                    </p>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex justify-end gap-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => {
+                      setIsBulkUploadDialogOpen(false);
+                      setBulkUploadData('');
+                      setUploadedFile(null);
+                      setBulkUploadCategory('');
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    onClick={handleBulkUpload}
+                    disabled={!bulkUploadData.trim() || !bulkUploadCategory || isProcessingFile}
+                  >
+                    {isProcessingFile ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      'Upload Affirmations'
+                    )}
+                  </Button>
+                </div>
               </div>
-              <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-                <SelectTrigger className="w-48">
-                  <SelectValue />
+            </DialogContent>
+          </Dialog>
+          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Affirmation
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Add New Affirmation</DialogTitle>
+                <DialogDescription>
+                  Create a new affirmation and assign it to a category.
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <Label htmlFor="text">Affirmation Text *</Label>
+                  <Input
+                    id="text"
+                    value={formData.text}
+                    onChange={(e) => setFormData(prev => ({ ...prev, text: e.target.value }))}
+                    placeholder="Enter affirmation text..."
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="category">Category *</Label>
+                  <Select
+                    value={formData.category_id}
+                    onValueChange={handleCategoryChange}
+                    required
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.map(category => (
+                        <SelectItem key={category.id} value={category.id}>
+                          <div className="flex items-center gap-2">
+                            <div 
+                              className="w-3 h-3 rounded-full" 
+                              style={{ backgroundColor: category.color }}
+                            />
+                            {category.name}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="image">Image (Optional)</Label>
+                  <Select
+                    value={formData.image_id || "none"}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, image_id: value === "none" ? "" : value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select image" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No image</SelectItem>
+                      {images
+                        .filter(img => img.category_id === formData.category_id)
+                        .map(image => (
+                          <SelectItem key={image.id} value={image.id}>
+                            <div className="flex items-center gap-2">
+                              <img
+                                src={image.file_url}
+                                alt={image.original_filename}
+                                className="w-6 h-6 object-cover rounded"
+                                onError={(e) => {
+                                  e.target.style.display = 'none';
+                                  e.target.nextSibling.style.display = 'block';
+                                }}
+                              />
+                              <ImageIcon className="h-4 w-4 hidden" />
+                              <span className="truncate">{image.original_filename}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit">Create</Button>
+                </div>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        {/* Two-Pane Layout */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Left Pane - Categories */}
+          <div className="lg:col-span-1">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Filter className="h-5 w-5" />
+                  Categories
+                </CardTitle>
+                <CardDescription>
+                  Click a category to filter affirmations
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="space-y-1">
+                  <button
+                    onClick={() => setSelectedCategory("")}
+                    className={`w-full text-left p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+                      selectedCategory === "" ? 'bg-blue-50 dark:bg-blue-900/20 border-r-2 border-blue-500' : ''
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full bg-gray-400" />
+                      <span className="font-medium">All Categories</span>
+                      <Badge variant="outline" className="ml-auto">
+                        {allAffirmations.length}
+                      </Badge>
+                    </div>
+                  </button>
+                  {categories.map((category) => {
+                    // Always show the total count of affirmations in this category (unfiltered)
+                    const categoryCount = allAffirmations.filter(a => a.category_id === category.id).length;
+                    
+                    return (
+                      <button
+                        key={category.id}
+                        onClick={() => setSelectedCategory(category.id)}
+                        className={`w-full text-left p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+                          selectedCategory === category.id ? 'bg-blue-50 dark:bg-blue-900/20 border-r-2 border-blue-500' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div 
+                            className="w-3 h-3 rounded-full" 
+                            style={{ backgroundColor: category.color }}
+                          />
+                          <span className="font-medium">{category.name}</span>
+                          <Badge variant="outline" className="ml-auto">
+                            {categoryCount}
+                          </Badge>
+                        </div>
+                        {category.description && (
+                          <p className="text-xs text-gray-500 mt-1 ml-5">
+                            {category.description}
+                          </p>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Right Pane - Affirmations */}
+          <div className="lg:col-span-3 space-y-6">
+            {/* Message Display */}
+            {message.text && (
+              <div className={`p-3 rounded-md flex items-center gap-2 ${
+                message.type === 'error' 
+                  ? 'text-red-600 bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400'
+                  : 'text-green-600 bg-green-50 border border-green-200 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400'
+              }`}>
+                {message.type === 'error' ? (
+                  <AlertCircle className="h-4 w-4" />
+                ) : (
+                  <CheckCircle className="h-4 w-4" />
+                )}
+                {message.text}
+              </div>
+            )}
+
+            {/* Search Bar */}
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex gap-4 items-center">
+                  <div className="flex-1">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <Input
+                        placeholder="Search affirmations..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={fetchAffirmations}
+                    disabled={isLoading}
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Bulk Actions */}
+            {selectedAffirmations.length > 0 && (
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">
+                      {selectedAffirmations.length} affirmation(s) selected
+                    </span>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={clearSelection}>
+                        Clear Selection
+                      </Button>
+                      <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete Selected
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Affirmations List */}
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>
+                    Affirmations ({affirmations.length})
+                    {selectedCategory && (
+                      <span className="text-sm font-normal text-gray-500 ml-2">
+                        in {categories.find(c => c.id === selectedCategory)?.name}
+                      </span>
+                    )}
+                  </CardTitle>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={selectAll}
+                      disabled={affirmations.length === 0}
+                    >
+                      Select All
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={clearSelection}
+                      disabled={selectedAffirmations.length === 0}
+                    >
+                      Clear Selection
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <div className="text-center py-8">
+                    <RefreshCw className="mx-auto h-8 w-8 animate-spin text-gray-400" />
+                    <p className="mt-2 text-gray-500">Loading affirmations...</p>
+                  </div>
+                ) : affirmations.length === 0 ? (
+                  <div className="text-center py-8">
+                    <AlertCircle className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">No affirmations found</h3>
+                    <p className="text-gray-500 mb-4">
+                      {searchTerm || selectedCategory ? 'Try adjusting your search or category filter' : 'Get started by creating your first affirmation'}
+                    </p>
+                    <Button onClick={() => setIsCreateDialogOpen(true)}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Affirmation
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {affirmations.map((affirmation) => (
+                      <div
+                        key={affirmation.id}
+                        className={`border rounded-lg p-4 space-y-3 ${
+                          selectedAffirmations.includes(affirmation.id) ? 'bg-blue-50 border-blue-200' : ''
+                        }`}
+                      >
+                        <div className="flex items-start gap-4">
+                          <input
+                            type="checkbox"
+                            checked={selectedAffirmations.includes(affirmation.id)}
+                            onChange={() => toggleSelection(affirmation.id)}
+                            className="mt-1"
+                          />
+                          
+                          {/* Image Thumbnail or Placeholder */}
+                          <div className="flex-shrink-0 relative group">
+                            {affirmation.images ? (
+                              <div className="relative">
+                                <img
+                                  src={affirmation.images.file_url}
+                                  alt={affirmation.images.original_filename}
+                                  className="w-16 h-16 object-cover rounded-lg border shadow-sm"
+                                  onError={(e) => {
+                                    e.target.style.display = 'none';
+                                    e.target.nextSibling.style.display = 'flex';
+                                  }}
+                                />
+                                <div className="w-16 h-16 bg-gray-100 rounded-lg border items-center justify-center hidden">
+                                  <ImageIcon className="h-6 w-6 text-gray-400" />
+                                </div>
+                                {/* Delete Image Button */}
+                                <button
+                                  onClick={() => removeImageFromAffirmation(affirmation)}
+                                  className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                                  title="Remove image"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                                {/* Change Image Button */}
+                                <button
+                                  onClick={() => handleImageSelect(affirmation)}
+                                  className="absolute -bottom-1 -right-1 w-6 h-6 bg-blue-500 hover:bg-blue-600 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                                  title="Change image"
+                                >
+                                  <ImageIcon className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => handleImageSelect(affirmation)}
+                                className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 flex items-center justify-center group transition-colors"
+                                title="Click to add image"
+                              >
+                                <div className="text-center">
+                                  <ImageIcon className="h-6 w-6 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 mx-auto mb-1" />
+                                  <span className="text-xs text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300">Add Image</span>
+                                </div>
+                              </button>
+                            )}
+                          </div>
+                          
+                          <div className="flex-1 min-w-0">
+                            <p className="text-lg font-medium mb-2">{affirmation.text}</p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge
+                                style={{ backgroundColor: affirmation.categories?.color || '#3B82F6' }}
+                                className="text-white"
+                              >
+                                {affirmation.categories?.name || 'Unknown'}
+                              </Badge>
+                              {affirmation.images && (
+                                <Badge variant="outline" className="flex items-center gap-1">
+                                  <ImageIcon className="h-3 w-3" />
+                                  {affirmation.images.original_filename}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                          
+                          <div className="flex gap-2 flex-shrink-0">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleEdit(affirmation)}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => handleDelete(affirmation.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Edit Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Affirmation</DialogTitle>
+            <DialogDescription>
+              Update the affirmation details.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <Label htmlFor="editText">Affirmation Text *</Label>
+              <Input
+                id="editText"
+                value={formData.text}
+                onChange={(e) => setFormData(prev => ({ ...prev, text: e.target.value }))}
+                placeholder="Enter affirmation text..."
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor="editCategory">Category *</Label>
+              <Select
+                value={formData.category_id}
+                onValueChange={handleCategoryChange}
+                required
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select category" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Categories</SelectItem>
-                  <SelectItem value="uncategorized">Uncategorized</SelectItem>
-                  {categories.map((category) => (
+                  {categories.map(category => (
                     <SelectItem key={category.id} value={category.id}>
                       <div className="flex items-center gap-2">
                         <div 
-                          className="w-3 h-3 rounded"
+                          className="w-3 h-3 rounded-full" 
                           style={{ backgroundColor: category.color }}
                         />
                         {category.name}
@@ -987,410 +1127,133 @@ export default function AffirmationsPage() {
                 </SelectContent>
               </Select>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Bulk Operations */}
-        {filteredAffirmations.length > 0 && (
-          <Card className="mb-6">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={selectedAffirmations.size === filteredAffirmations.length && filteredAffirmations.length > 0}
-                      onChange={selectAllAffirmations}
-                      className="h-4 w-4 rounded border-gray-300"
-                    />
-                    <Label className="text-sm font-medium">
-                      Select All ({selectedAffirmations.size}/{filteredAffirmations.length})
-                    </Label>
-                  </div>
-                  {selectedAffirmations.size > 0 && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={clearSelection}
-                    >
-                      Clear Selection
-                    </Button>
-                  )}
-                </div>
-                {selectedAffirmations.size > 0 && (
-                  <Button
-                    onClick={bulkFetchImages}
-                    disabled={isBulkLoading}
-                    className="bg-green-600 hover:bg-green-700"
-                  >
-                    {isBulkLoading ? (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                        Fetching Images...
-                      </>
-                    ) : (
-                      <>
-                        <Image className="mr-2 h-4 w-4" />
-                        Bulk Fetch Images ({selectedAffirmations.size})
-                      </>
-                    )}
-                  </Button>
-                )}
-              </div>
-              {selectedAffirmations.size > 0 && (
-                <div className="mt-3 text-sm text-muted-foreground">
-                  <p>📋 <strong>{selectedAffirmations.size}</strong> affirmations selected</p>
-                  <p>🎯 Only affirmations with categories will get images</p>
-                  <p>⏱️ This may take a few moments for large selections</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Affirmations Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              Your Affirmations ({filteredAffirmations.length})
-            </CardTitle>
-            <CardDescription>
-              Manage your personal affirmations and positive thoughts
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {filteredAffirmations.length === 0 ? (
-              <div className="text-center py-8">
-                <MessageSquare className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">
-                  {selectedCategory === 'all' ? 'No affirmations yet' : 'No affirmations in this category'}
-                </h3>
-                <p className="text-muted-foreground mb-4">
-                  {selectedCategory === 'all' 
-                    ? 'Start building your collection of positive affirmations.'
-                    : 'Try selecting a different category or create a new affirmation.'
-                  }
-                </p>
-                <Button onClick={() => setIsDialogOpen(true)}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Your First Affirmation
-                </Button>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-12">
-                      <input
-                        type="checkbox"
-                        checked={selectedAffirmations.size === filteredAffirmations.length && filteredAffirmations.length > 0}
-                        onChange={selectAllAffirmations}
-                        className="h-4 w-4 rounded border-gray-300"
-                      />
-                    </TableHead>
-                    <TableHead>Image</TableHead>
-                    <TableHead>Affirmation</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredAffirmations.map((affirmation) => (
-                    <TableRow 
-                      key={affirmation.id}
-                      className={selectedAffirmations.has(affirmation.id) ? 'bg-blue-50 dark:bg-blue-950/20' : ''}
-                    >
-                      <TableCell className="w-12">
-                        <input
-                          type="checkbox"
-                          checked={selectedAffirmations.has(affirmation.id)}
-                          onChange={() => toggleAffirmationSelection(affirmation.id)}
-                          className="h-4 w-4 rounded border-gray-300"
-                        />
-                      </TableCell>
-                      <TableCell className="w-24">
-                        <div className="flex flex-col items-center gap-2">
-                          {affirmation.image_url ? (
-                            <div className="relative">
-                              <img
-                                src={affirmation.image_url}
-                                alt={affirmation.image_alt_text || 'Affirmation image'}
-                                className="w-16 h-16 object-cover rounded-lg border-2 border-gray-200 cursor-pointer hover:opacity-80 transition-opacity"
-                                onClick={() => openImageModal(affirmation.image_url, affirmation.image_alt_text)}
-                                title="Click to view full size"
-                              />
-                              {isManualImage(affirmation) ? (
-                                <div className="absolute -top-2 -right-2 flex gap-1">
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => deleteManualImage(affirmation)}
-                                    className="p-1 h-6 w-6 bg-red-100 border border-red-200 rounded-full shadow-sm hover:bg-red-200"
-                                    title="Delete manual image"
-                                  >
-                                    <X className="h-3 w-3 text-red-600" />
-                                  </Button>
-                                </div>
-                              ) : (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => fetchAndStoreImage(affirmation)}
-                                  className="absolute -top-2 -right-2 p-1 h-6 w-6 bg-white border border-gray-200 rounded-full shadow-sm hover:bg-gray-50"
-                                  title="Refresh image"
-                                >
-                                  <RefreshCw className="h-3 w-3" />
-                                </Button>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="w-16 h-16 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
-                              <Image className="h-6 w-6 text-gray-400" />
-                            </div>
-                          )}
-                          {!affirmation.image_url && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => fetchAndStoreImage(affirmation)}
-                              disabled={isImageLoading || !affirmation.categories?.name}
-                              className="text-xs"
-                            >
-                              {isImageLoading ? (
-                                <RefreshCw className="h-3 w-3 animate-spin mr-1" />
-                              ) : (
-                                <Image className="h-3 w-3 mr-1" />
-                              )}
-                              Add Image
-                            </Button>
-                          )}
-                          {/* Upload icon - always visible */}
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => openUploadModal(affirmation)}
-                            className="p-1 h-6 w-6 bg-blue-100 border border-blue-200 rounded-full shadow-sm hover:bg-blue-200"
-                            title="Upload custom image"
-                          >
-                            <Upload className="h-3 w-3 text-blue-600" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                      <TableCell className="max-w-md">
-                        <div className="flex items-start gap-2">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => toggleFavorite(affirmation)}
-                            className="p-1 h-6 w-6"
-                          >
-                            {affirmation.is_favorite ? (
-                              <Heart className="h-4 w-4 text-red-500 fill-red-500" />
-                            ) : (
-                              <Heart className="h-4 w-4 text-muted-foreground" />
-                            )}
-                          </Button>
-                          <div className="flex-1">
-                            <p className="text-sm font-medium leading-relaxed">
-                              {affirmation.text}
-                            </p>
-                            <div className="text-xs text-muted-foreground mt-1">
-                              {affirmation.text.length}/100 characters
-                            </div>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {affirmation.categories ? (
-                          <Badge 
-                            variant="outline"
-                            style={{ 
-                              backgroundColor: affirmation.categories.color + '20',
-                              borderColor: affirmation.categories.color,
-                              color: affirmation.categories.color
+            <div>
+              <Label htmlFor="editImage">Image (Optional)</Label>
+              <Select
+                value={formData.image_id || "none"}
+                onValueChange={(value) => setFormData(prev => ({ ...prev, image_id: value === "none" ? "" : value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select image" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No image</SelectItem>
+                  {images
+                    .filter(img => img.category_id === formData.category_id)
+                    .map(image => (
+                      <SelectItem key={image.id} value={image.id}>
+                        <div className="flex items-center gap-2">
+                          <img
+                            src={image.file_url}
+                            alt={image.original_filename}
+                            className="w-6 h-6 object-cover rounded"
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                              e.target.nextSibling.style.display = 'block';
                             }}
-                          >
-                            {affirmation.categories.name}
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary">Uncategorized</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {new Date(affirmation.created_at).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex gap-2 justify-end">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleEdit(affirmation)}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleDelete(affirmation.id)}
-                            className="text-destructive hover:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          />
+                          <ImageIcon className="h-4 w-4 hidden" />
+                          <span className="truncate">{image.original_filename}</span>
                         </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Image Modal */}
-        <Dialog open={imageModal.isOpen} onOpenChange={closeImageModal}>
-          <DialogContent className="max-w-4xl max-h-[90vh] p-0 overflow-hidden">
-            <DialogHeader className="p-6 pb-4">
-              <DialogTitle>Affirmation Image</DialogTitle>
-              <DialogDescription>
-                {imageModal.image?.alt || 'View your affirmation image in full size'}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="px-6 pb-6">
-              {imageModal.image && (
-                <div className="relative">
-                  <img
-                    src={imageModal.image.url}
-                    alt={imageModal.image.alt}
-                    className="w-full h-auto max-h-[70vh] object-contain rounded-lg shadow-lg"
-                  />
-                  <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
-                    <span>Click outside or press ESC to close</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={closeImageModal}
-                    >
-                      Close
-                    </Button>
-                  </div>
-                </div>
-              )}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
             </div>
-          </DialogContent>
-        </Dialog>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">Update</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-        {/* Upload Modal */}
-        <Dialog open={uploadModal.isOpen} onOpenChange={closeUploadModal}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Upload Custom Image</DialogTitle>
-              <DialogDescription>
-                Upload a custom image for: "{uploadModal.affirmation?.text}"
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="image-upload">Select Image</Label>
-                <Input
-                  id="image-upload"
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileSelect}
-                  className="mt-2"
-                  disabled={isCompressing}
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Maximum file size: 5MB. Images will be automatically compressed to 1MB max with 1920px max resolution.
+      {/* Image Selection Modal */}
+      <Dialog open={isImageSelectDialogOpen} onOpenChange={setIsImageSelectDialogOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Select Image for Affirmation</DialogTitle>
+            <DialogDescription>
+              Choose an image from the "{selectedAffirmationForImage?.categories?.name}" category or remove the current image.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Current Affirmation Info */}
+            {selectedAffirmationForImage && (
+              <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <p className="font-medium">{selectedAffirmationForImage.text}</p>
+                <p className="text-sm text-gray-500">
+                  Category: {selectedAffirmationForImage.categories?.name}
                 </p>
-                <div className="mt-2 p-2 bg-blue-50 rounded-md">
-                  <p className="text-xs text-blue-700">
-                    <strong>Compression Settings:</strong><br/>
-                    • Max file size: 1MB<br/>
-                    • Max resolution: 1920px (width or height)<br/>
-                    • Quality: Optimized for web display<br/>
-                    • Formats: JPG, PNG, WebP, GIF
-                  </p>
-                </div>
-                {isCompressing && (
-                  <div className="mt-2">
-                    <div className="flex items-center gap-2 text-sm text-blue-600">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                      Compressing image... {compressionProgress}%
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
-                      <div 
-                        className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${compressionProgress}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                )}
               </div>
-              
-              {uploadModal.preview && (
-                <div>
-                  <Label>Preview</Label>
-                  <div className="mt-2 relative">
-                    <img
-                      src={uploadModal.preview}
-                      alt="Preview"
-                      className="w-full h-32 object-cover rounded-lg border border-gray-200"
-                    />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setUploadModal(prev => ({ ...prev, file: null, preview: null }))}
-                      className="absolute top-2 right-2 p-1 h-6 w-6 bg-white border border-gray-200 rounded-full shadow-sm hover:bg-gray-50"
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                  {uploadModal.file && (
-                    <div className="mt-2 p-2 bg-green-50 rounded-md">
-                      <p className="text-xs text-green-700">
-                        <strong>Ready to upload:</strong><br/>
-                        File size: {(uploadModal.file.size / 1024 / 1024).toFixed(2)}MB<br/>
-                        Type: {uploadModal.file.type}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
+            )}
 
-              <div className="flex gap-2 pt-4">
-                <Button
-                  onClick={uploadManualImage}
-                  disabled={!uploadModal.file || isCompressing}
-                  className="flex-1"
-                >
-                  {isCompressing ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                      Compressing...
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="mr-2 h-4 w-4" />
-                      Upload Image
-                    </>
-                  )}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={closeUploadModal}
-                  disabled={isCompressing}
-                >
-                  Cancel
+            {/* Images Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 max-h-96 overflow-y-auto">
+              {/* No Image Option */}
+              <button
+                onClick={() => removeImageFromAffirmation(selectedAffirmationForImage)}
+                className="p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-gray-400 dark:hover:border-gray-500 flex flex-col items-center justify-center group transition-colors"
+              >
+                <X className="h-8 w-8 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 mb-2" />
+                <span className="text-sm text-gray-500 group-hover:text-gray-700 dark:group-hover:text-gray-300">Remove Image</span>
+              </button>
+
+              {/* Available Images */}
+              {images
+                .filter(img => img.category_id === selectedAffirmationForImage?.category_id)
+                .map(image => (
+                  <button
+                    key={image.id}
+                    onClick={() => assignImageToAffirmation(image.id)}
+                    className="p-2 border rounded-lg hover:border-blue-500 hover:shadow-md transition-all group"
+                  >
+                    <img
+                      src={image.file_url}
+                      alt={image.original_filename}
+                      className="w-full h-24 object-cover rounded mb-2"
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                        e.target.nextSibling.style.display = 'flex';
+                      }}
+                    />
+                    <div className="w-full h-24 bg-gray-100 rounded mb-2 items-center justify-center hidden">
+                      <ImageIcon className="h-6 w-6 text-gray-400" />
+                    </div>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 truncate group-hover:text-gray-800 dark:group-hover:text-gray-200">
+                      {image.original_filename}
+                    </p>
+                  </button>
+                ))}
+            </div>
+
+            {/* No Images Available */}
+            {images.filter(img => img.category_id === selectedAffirmationForImage?.category_id).length === 0 && (
+              <div className="text-center py-8">
+                <ImageIcon className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No Images Available</h3>
+                <p className="text-gray-500 mb-4">
+                  There are no images uploaded for the "{selectedAffirmationForImage?.categories?.name}" category yet.
+                </p>
+                <Button onClick={() => router.push('/admin/images')} variant="outline">
+                  <ImageIcon className="h-4 w-4 mr-2" />
+                  Upload Images
                 </Button>
               </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button variant="outline" onClick={() => setIsImageSelectDialogOpen(false)}>
+                Cancel
+              </Button>
             </div>
-          </DialogContent>
-        </Dialog>
-        
-        {/* Toast Container */}
-        <ToastContainer />
-      </div>
-    </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+        </div>
+          </div>
   );
 }
