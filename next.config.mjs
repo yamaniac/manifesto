@@ -53,7 +53,19 @@ const nextConfig = {
   // Additional security configurations
   poweredByHeader: false,
   compress: true,
-  reactStrictMode: true
+  reactStrictMode: true,
+  // API route configurations
+  experimental: {
+    // Increase body size limit for file uploads
+    serverComponentsExternalPackages: ['sharp']
+  },
+  // Configure API routes
+  api: {
+    bodyParser: {
+      sizeLimit: '50mb', // Increase from default 1mb
+    },
+    responseLimit: false,
+  }
 };
 
 export default nextConfig;

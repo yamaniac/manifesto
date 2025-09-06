@@ -1,6 +1,17 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
+// Configure this route for large file uploads
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '50mb',
+    },
+  },
+  // Increase timeout for this route
+  maxDuration: 300, // 5 minutes
+};
+
 const MAX_FILES = 20;
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/svg+xml'];
@@ -28,8 +39,20 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Forbidden - Super admin access required' }, { status: 403 });
     }
 
-    // Parse form data
-    const formData = await request.formData();
+    // Parse form data with timeout
+    let formData;
+    try {
+      formData = await Promise.race([
+        request.formData(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Form data parsing timeout')), 30000)
+        )
+      ]);
+    } catch (error) {
+      console.error('Form data parsing error:', error);
+      return NextResponse.json({ error: 'Failed to parse form data' }, { status: 400 });
+    }
+
     const files = formData.getAll('files');
     const categories = formData.getAll('categories');
 
@@ -67,68 +90,33 @@ export async function POST(request) {
     const uploadResults = [];
     const errors = [];
 
-    // Process each file
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const categoryId = categories[i];
+    // Process files in batches to avoid timeout
+    const BATCH_SIZE = 5;
+    const batches = [];
+    for (let i = 0; i < files.length; i += BATCH_SIZE) {
+      batches.push(files.slice(i, i + BATCH_SIZE));
+    }
 
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      
+      // Process batch with timeout
       try {
-        // Validate file
-        const validationError = validateFile(file);
-        if (validationError) {
-          errors.push({ filename: file.name, error: validationError });
-          uploadResults.push({ success: false, error: validationError });
-          continue;
-        }
-
-        // Generate unique filename
-        const timestamp = Date.now();
-        const randomId = Math.random().toString(36).substr(2, 9);
-        const fileExtension = file.name.split('.').pop();
-        const uniqueFilename = `${timestamp}_${randomId}.${fileExtension}`;
-
-        // Upload to storage
-        const uploadResult = await uploadFileToStorage(file, uniqueFilename, user.id);
-        
-        if (!uploadResult.success) {
-          errors.push({ filename: file.name, error: uploadResult.error });
-          uploadResults.push({ success: false, error: uploadResult.error });
-          continue;
-        }
-
-        // Save to database
-        const { data: imageRecord, error: dbError } = await supabase
-          .from('images')
-          .insert({
-            filename: uniqueFilename,
-            original_filename: file.name,
-            file_path: uploadResult.storage_path,
-            file_url: uploadResult.public_url,
-            file_size: file.size,
-            content_type: file.type,
-            category_id: categoryId,
-            uploaded_by: user.id
-          })
-          .select()
-          .single();
-
-        if (dbError) {
-          console.error('Database error for file:', file.name, dbError);
-          errors.push({ filename: file.name, error: 'Failed to save to database' });
-          uploadResults.push({ success: false, error: 'Failed to save to database' });
-          continue;
-        }
-
-        uploadResults.push({ 
-          success: true, 
-          data: imageRecord,
-          filename: file.name 
-        });
-
+        await Promise.race([
+          processBatch(batch, categories, user.id, supabase, uploadResults, errors, batchIndex * BATCH_SIZE),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Batch processing timeout')), 120000) // 2 minutes per batch
+          )
+        ]);
       } catch (error) {
-        console.error('Error processing file:', file.name, error);
-        errors.push({ filename: file.name, error: error.message });
-        uploadResults.push({ success: false, error: error.message });
+        console.error(`Error processing batch ${batchIndex + 1}:`, error);
+        // Mark remaining files in this batch as failed
+        for (let i = 0; i < batch.length; i++) {
+          const fileIndex = batchIndex * BATCH_SIZE + i;
+          const file = batch[i];
+          errors.push({ filename: file.name, error: 'Batch processing timeout' });
+          uploadResults.push({ success: false, error: 'Batch processing timeout' });
+        }
       }
     }
 
@@ -162,6 +150,73 @@ function validateFile(file) {
   }
 
   return null;
+}
+
+// Process a batch of files
+async function processBatch(batch, categories, userId, supabase, uploadResults, errors, startIndex) {
+  for (let i = 0; i < batch.length; i++) {
+    const file = batch[i];
+    const categoryId = categories[startIndex + i];
+
+    try {
+      // Validate file
+      const validationError = validateFile(file);
+      if (validationError) {
+        errors.push({ filename: file.name, error: validationError });
+        uploadResults.push({ success: false, error: validationError });
+        continue;
+      }
+
+      // Generate unique filename
+      const timestamp = Date.now();
+      const randomId = Math.random().toString(36).substr(2, 9);
+      const fileExtension = file.name.split('.').pop();
+      const uniqueFilename = `${timestamp}_${randomId}.${fileExtension}`;
+
+      // Upload to storage
+      const uploadResult = await uploadFileToStorage(file, uniqueFilename, userId);
+      
+      if (!uploadResult.success) {
+        errors.push({ filename: file.name, error: uploadResult.error });
+        uploadResults.push({ success: false, error: uploadResult.error });
+        continue;
+      }
+
+      // Save to database
+      const { data: imageRecord, error: dbError } = await supabase
+        .from('images')
+        .insert({
+          filename: uniqueFilename,
+          original_filename: file.name,
+          file_path: uploadResult.storage_path,
+          file_url: uploadResult.public_url,
+          file_size: file.size,
+          content_type: file.type,
+          category_id: categoryId,
+          uploaded_by: userId
+        })
+        .select()
+        .single();
+
+      if (dbError) {
+        console.error('Database error for file:', file.name, dbError);
+        errors.push({ filename: file.name, error: 'Failed to save to database' });
+        uploadResults.push({ success: false, error: 'Failed to save to database' });
+        continue;
+      }
+
+      uploadResults.push({ 
+        success: true, 
+        data: imageRecord,
+        filename: file.name 
+      });
+
+    } catch (error) {
+      console.error('Error processing file:', file.name, error);
+      errors.push({ filename: file.name, error: error.message });
+      uploadResults.push({ success: false, error: error.message });
+    }
+  }
 }
 
 // Upload file to storage

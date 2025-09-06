@@ -186,10 +186,25 @@ export default function MultiImageUpload() {
         formData.append(`categories`, fileObj.categoryId);
       });
 
+      // Create AbortController for timeout handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+
       const response = await fetch('/api/images/upload', {
         method: 'POST',
         body: formData,
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
+
+      // Check if response is JSON before parsing
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('Non-JSON response received:', text);
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
 
       const result = await response.json();
 
@@ -232,7 +247,19 @@ export default function MultiImageUpload() {
 
     } catch (error) {
       console.error('Upload error:', error);
-      showMessage('error', 'Upload failed: ' + error.message);
+      
+      let errorMessage = 'Upload failed: ';
+      if (error.name === 'AbortError') {
+        errorMessage += 'Upload timed out. Please try with fewer files or smaller file sizes.';
+      } else if (error.message.includes('504')) {
+        errorMessage += 'Server timeout. Please try uploading fewer files at once.';
+      } else if (error.message.includes('Server error:')) {
+        errorMessage += error.message;
+      } else {
+        errorMessage += error.message;
+      }
+      
+      showMessage('error', errorMessage);
       
       // Mark all files as failed
       const newStatus = {};
