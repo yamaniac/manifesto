@@ -7,12 +7,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import UserManagement from '@/components/admin/UserManagement';
 import { useRouter } from "next/navigation";
-import { Shield, Crown, Users, ArrowLeft, Database, Lock, Tag, MessageSquare, Image, HardDrive, RefreshCw } from 'lucide-react';
+import { Shield, Crown, Users, ArrowLeft, Database, Lock, Tag, MessageSquare, Image, HardDrive, RefreshCw, Music } from 'lucide-react';
 
 export default function AdminDashboard() {
   const { user, isSuperAdmin, getPrimaryRole, loading, signOut } = useAuth();
   const router = useRouter();
   const [isStorageInitializing, setIsStorageInitializing] = useState(false);
+  const [isAudioStorageInitializing, setIsAudioStorageInitializing] = useState(false);
+  const [isTestingAudio, setIsTestingAudio] = useState(false);
 
   console.log('🔍 AdminDashboard received:', { 
     user: user ? { id: user.id, email: user.email } : null, 
@@ -47,6 +49,52 @@ export default function AdminDashboard() {
       alert('Error initializing storage: ' + error.message);
     } finally {
       setIsStorageInitializing(false);
+    }
+  };
+
+  const initializeAudioStorage = async () => {
+    setIsAudioStorageInitializing(true);
+    try {
+      const response = await fetch('/api/storage/init-audio', {
+        method: 'POST',
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        alert('Audio storage bucket initialized successfully!');
+        console.log('Audio storage result:', result);
+      } else {
+        const errorData = await response.json();
+        console.error('Audio storage error:', errorData);
+        alert('Error initializing audio storage: ' + (errorData.error || 'Unknown error') + '\n\nDetails: ' + (errorData.details || 'No details available'));
+      }
+    } catch (error) {
+      console.error('Error initializing audio storage:', error);
+      alert('Error initializing audio storage: ' + error.message);
+    } finally {
+      setIsAudioStorageInitializing(false);
+    }
+  };
+
+  const testAudioStorage = async () => {
+    setIsTestingAudio(true);
+    try {
+      const response = await fetch('/api/audio/test', {
+        method: 'GET',
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok) {
+        alert('Audio storage test passed! ✅\n\n' + JSON.stringify(result, null, 2));
+      } else {
+        alert('Audio storage test failed! ❌\n\n' + JSON.stringify(result, null, 2));
+      }
+    } catch (error) {
+      console.error('Error testing audio storage:', error);
+      alert('Error testing audio storage: ' + error.message);
+    } finally {
+      setIsTestingAudio(false);
     }
   };
 
@@ -209,6 +257,15 @@ export default function AdminDashboard() {
                   <Image className="mr-2 h-4 w-4" />
                   Image Management
                 </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="w-full justify-start"
+                  onClick={() => router.push('/admin/audio')}
+                >
+                  <Music className="mr-2 h-4 w-4" />
+                  Audio Management
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -242,6 +299,42 @@ export default function AdminDashboard() {
                 </Button>
                 <p className="text-xs text-muted-foreground">
                   Creates storage bucket for affirmation images
+                </p>
+                
+                <div className="flex items-center justify-between mt-4">
+                  <span className="text-sm text-muted-foreground">Audio Storage</span>
+                  <Badge variant="outline" className="text-xs">Audio Files</Badge>
+                </div>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="w-full justify-start"
+                  onClick={initializeAudioStorage}
+                  disabled={isAudioStorageInitializing}
+                >
+                  {isAudioStorageInitializing ? (
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Music className="mr-2 h-4 w-4" />
+                  )}
+                  {isAudioStorageInitializing ? 'Initializing...' : 'Initialize Audio Storage'}
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="w-full justify-start"
+                  onClick={testAudioStorage}
+                  disabled={isTestingAudio}
+                >
+                  {isTestingAudio ? (
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Database className="mr-2 h-4 w-4" />
+                  )}
+                  {isTestingAudio ? 'Testing...' : 'Test Audio Storage'}
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Creates storage bucket for audio files
                 </p>
               </div>
             </CardContent>

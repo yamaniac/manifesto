@@ -36,6 +36,7 @@ export default function AffirmationsPage() {
   const [bulkUploadCategory, setBulkUploadCategory] = useState('');
   const [isImageSelectDialogOpen, setIsImageSelectDialogOpen] = useState(false);
   const [selectedAffirmationForImage, setSelectedAffirmationForImage] = useState(null);
+  const [isBulkImageAssigning, setIsBulkImageAssigning] = useState(false);
 
   // Form states
   const [formData, setFormData] = useState({
@@ -468,6 +469,113 @@ export default function AffirmationsPage() {
     }
   };
 
+  // Bulk assign images to selected affirmations
+  const handleBulkImageAssignment = async () => {
+    if (selectedAffirmations.length === 0) {
+      showMessage('error', 'Please select affirmations to assign images to');
+      return;
+    }
+
+    // Filter affirmations that don't have images
+    const affirmationsWithoutImages = affirmations.filter(affirmation => 
+      selectedAffirmations.includes(affirmation.id) && !affirmation.images
+    );
+
+    if (affirmationsWithoutImages.length === 0) {
+      showMessage('info', 'All selected affirmations already have images assigned');
+      return;
+    }
+
+    setIsBulkImageAssigning(true);
+    
+    try {
+      // Group affirmations by category
+      const affirmationsByCategory = {};
+      affirmationsWithoutImages.forEach(affirmation => {
+        if (!affirmationsByCategory[affirmation.category_id]) {
+          affirmationsByCategory[affirmation.category_id] = [];
+        }
+        affirmationsByCategory[affirmation.category_id].push(affirmation);
+      });
+
+      let totalAssigned = 0;
+      let totalSkipped = 0;
+
+      // Process each category
+      for (const [categoryId, categoryAffirmations] of Object.entries(affirmationsByCategory)) {
+        // Fetch available images for this category
+        const response = await fetch(`/api/images?category_id=${categoryId}`);
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || `Failed to fetch images for category ${categoryId}`);
+        }
+
+        const availableImages = result.data || [];
+        
+        if (availableImages.length === 0) {
+          showMessage('warning', `No images available for category: ${categories.find(c => c.id === categoryId)?.name || 'Unknown'}`);
+          totalSkipped += categoryAffirmations.length;
+          continue;
+        }
+
+        // Shuffle images to ensure random assignment
+        const shuffledImages = [...availableImages].sort(() => Math.random() - 0.5);
+        
+        // Assign unique images to affirmations
+        for (let i = 0; i < categoryAffirmations.length; i++) {
+          const affirmation = categoryAffirmations[i];
+          const imageIndex = i % shuffledImages.length; // Cycle through images if there are more affirmations than images
+          const image = shuffledImages[imageIndex];
+
+          try {
+            const updateResponse = await fetch(`/api/affirmations/${affirmation.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                text: affirmation.text,
+                category_id: affirmation.category_id,
+                image_id: image.id
+              })
+            });
+
+            const updateResult = await updateResponse.json();
+
+            if (!updateResponse.ok) {
+              throw new Error(updateResult.error || 'Failed to assign image');
+            }
+
+            totalAssigned++;
+          } catch (error) {
+            console.error(`Error assigning image to affirmation ${affirmation.id}:`, error);
+            totalSkipped++;
+          }
+        }
+      }
+
+      // Refresh data
+      await fetchAffirmations();
+      await fetchAllAffirmations();
+
+      // Show results
+      if (totalAssigned > 0) {
+        showMessage('success', `Successfully assigned images to ${totalAssigned} affirmation(s)`);
+      }
+      if (totalSkipped > 0) {
+        showMessage('warning', `${totalSkipped} affirmation(s) could not be assigned images`);
+      }
+
+      // Clear selection
+      setSelectedAffirmations([]);
+
+    } catch (error) {
+      console.error('Error in bulk image assignment:', error);
+      showMessage('error', 'Error assigning images: ' + error.message);
+    } finally {
+      setIsBulkImageAssigning(false);
+    }
+  };
+
   if (!user || !isSuperAdmin) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
@@ -535,6 +643,23 @@ export default function AffirmationsPage() {
           >
             <Download className="h-4 w-4 mr-2" />
             Export CSV
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleBulkImageAssignment}
+            disabled={isLoading || selectedAffirmations.length === 0 || isBulkImageAssigning}
+          >
+            {isBulkImageAssigning ? (
+              <>
+                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                Assigning Images...
+              </>
+            ) : (
+              <>
+                <ImageIcon className="h-4 w-4 mr-2" />
+                Assign Images
+              </>
+            )}
           </Button>
           <Dialog open={isBulkUploadDialogOpen} onOpenChange={setIsBulkUploadDialogOpen}>
             <DialogTrigger asChild>

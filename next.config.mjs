@@ -62,7 +62,7 @@ const nextConfig = {
   // Configure API routes
   api: {
     bodyParser: {
-      sizeLimit: '50mb', // Increase from default 1mb
+      sizeLimit: '200mb', // Increased for large audio files
     },
     responseLimit: false,
   }

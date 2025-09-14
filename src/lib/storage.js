@@ -10,6 +10,7 @@ const supabase = createClient();
 // Admin client with storage credentials for elevated permissions
 const supabaseAdmin = createAdminClient();
 const STORAGE_BUCKET = 'affirmation-images';
+const AUDIO_STORAGE_BUCKET = 'audio-files';
 
 /**
  * Initialize storage bucket if it doesn't exist
@@ -47,6 +48,50 @@ export async function initializeStorage() {
 }
 
 /**
+ * Initialize audio storage bucket if it doesn't exist
+ * Note: This should be run once during setup
+ */
+export async function initializeAudioStorage() {
+  try {
+    // Check if bucket exists
+    const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+    
+    if (listError) {
+      console.error('Error listing buckets:', listError);
+      throw new Error(`Failed to list storage buckets: ${listError.message}`);
+    }
+    
+    const bucketExists = buckets.some(bucket => bucket.name === AUDIO_STORAGE_BUCKET);
+    
+    if (!bucketExists) {
+      console.log('Creating audio storage bucket...');
+      // Create bucket with public access for audio files using admin client
+      const { error: createError } = await supabaseAdmin.storage.createBucket(AUDIO_STORAGE_BUCKET, {
+        public: true,
+        allowedMimeTypes: ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/m4a', 'audio/aac', 'audio/webm'],
+        fileSizeLimit: 52428800 // 50MB limit
+      });
+      
+      if (createError) {
+        console.error('Error creating audio storage bucket:', createError);
+        throw new Error(`Failed to create audio storage bucket: ${createError.message}`);
+      }
+      console.log('Audio storage bucket created successfully');
+    } else {
+      console.log('Audio storage bucket already exists');
+    }
+    
+    // Set up RLS policies for the audio storage bucket
+    await setupAudioStoragePolicies();
+    
+    return true;
+  } catch (error) {
+    console.error('Error initializing audio storage:', error);
+    throw error; // Re-throw to get better error messages
+  }
+}
+
+/**
  * Set up Row Level Security policies for the storage bucket
  */
 async function setupStoragePolicies() {
@@ -60,6 +105,23 @@ async function setupStoragePolicies() {
     console.log('3. Allow users to delete their own files');
   } catch (error) {
     console.error('Error setting up storage policies:', error);
+  }
+}
+
+/**
+ * Set up Row Level Security policies for the audio storage bucket
+ */
+async function setupAudioStoragePolicies() {
+  try {
+    // Note: Storage policies need to be set up via SQL
+    // This function is a placeholder - the actual policies should be set up in the database
+    console.log('Audio storage policies should be configured in Supabase dashboard or via SQL');
+    console.log('Required policies for audio-files bucket:');
+    console.log('1. Allow authenticated users to upload audio files');
+    console.log('2. Allow public read access to audio files');
+    console.log('3. Allow users to delete their own audio files');
+  } catch (error) {
+    console.error('Error setting up audio storage policies:', error);
   }
 }
 
